@@ -1,0 +1,23 @@
+[package]
+name = "florynx-kernel"
+version = "0.2.0"
+edition = "2021"
+authors = ["Florynx OS Team"]
+description = "Florynx Kernel - A minimal modern x86_64 operating system kernel"
+
+[dependencies]
+bootloader = { version = "0.9.29", features = ["map_physical_memory"] }
+volatile = "0.2.7"
+spin = "0.5.2"
+x86_64 = "0.14.13"
+uart_16550 = "0.2.19"
+pic8259 = "0.10.4"
+pc-keyboard = "0.7.0"
+linked_list_allocator = "0.9.1"
+lazy_static = { version = "1.5.0", features = ["spin_no_std"] }
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
