@@ -6,3 +6,4 @@ pub mod gdt;
 pub mod idt;
 pub mod cpu;
 pub mod interrupts;
+pub mod asm_utils;
