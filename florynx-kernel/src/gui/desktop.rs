@@ -9,7 +9,7 @@ use alloc::vec::Vec;
 use spin::Mutex;
 use crate::gui::renderer::{self, Color, FramebufferManager, FRAMEBUFFER};
 use crate::gui::theme;
-use crate::gui::event::{Event, MouseButton};
+use crate::gui::event::{Event, MouseButton, Rect};
 use crate::gui::window::Window;
 use crate::gui::dock::Dock;
 
@@ -153,11 +153,26 @@ impl WindowManager {
         }
         false
     }
+
+    /// Get the bounds (including shadow) of the currently dragged window, if any.
+    fn dragged_bounds_with_shadow(&self) -> Option<Rect> {
+        for i in 0..self.count {
+            let slot = self.order[i];
+            if let Some(ref w) = self.windows[slot] {
+                if w.is_dragging() {
+                    return Some(w.bounds_with_shadow());
+                }
+            }
+        }
+        None
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Desktop
 // ---------------------------------------------------------------------------
+
+const MAX_DIRTY: usize = 8;
 
 pub struct Desktop {
     wm: WindowManager,
@@ -167,11 +182,13 @@ pub struct Desktop {
     mouse_x: usize,
     mouse_y: usize,
     prev_buttons: u8,
-    needs_redraw: bool,
+    needs_full_redraw: bool,
     /// Cached desktop background (RGB bytes, screen_w * screen_h * 3).
-    /// Rendered once on first draw, then blitted on subsequent redraws.
     bg_cache: Vec<u8>,
     bg_cached: bool,
+    /// Dirty rectangles for partial redraw (avoids full-screen blit on drag).
+    dirty: [Rect; MAX_DIRTY],
+    dirty_count: usize,
 }
 
 impl Desktop {
@@ -195,24 +212,52 @@ impl Desktop {
             mouse_x: screen_w / 2,
             mouse_y: screen_h / 2,
             prev_buttons: 0,
-            needs_redraw: true,
+            needs_full_redraw: true,
             bg_cache: Vec::new(),
             bg_cached: false,
+            dirty: [Rect::new(0, 0, 0, 0); MAX_DIRTY],
+            dirty_count: 0,
         }
     }
 
     /// Add a window to the desktop.
     pub fn add_window(&mut self, win: Window) -> usize {
         let id = self.wm.add_window(win);
-        self.needs_redraw = true;
+        self.needs_full_redraw = true;
         id
     }
 
-    /// Draw the entire desktop to the framebuffer.
-    pub fn draw(&mut self, fb: &mut FramebufferManager) {
+    /// Mark a rectangle as dirty (needs repaint).
+    fn mark_dirty(&mut self, r: Rect) {
+        let r = r.clamp(self.screen_w, self.screen_h);
+        if r.w == 0 || r.h == 0 { return; }
+        if self.dirty_count < MAX_DIRTY {
+            self.dirty[self.dirty_count] = r;
+            self.dirty_count += 1;
+        } else {
+            // Too many dirty rects — fall back to full redraw
+            self.needs_full_redraw = true;
+        }
+    }
+
+    /// Blit a rectangle from the bg_cache onto the framebuffer.
+    fn blit_bg_rect(&self, fb: &mut FramebufferManager, r: &Rect) {
+        let sw = self.screen_w;
+        for y in r.y..(r.y + r.h).min(self.screen_h) {
+            for x in r.x..(r.x + r.w).min(sw) {
+                let idx = (y * sw + x) * 3;
+                fb.set_pixel(x, y,
+                    self.bg_cache[idx],
+                    self.bg_cache[idx + 1],
+                    self.bg_cache[idx + 2]);
+            }
+        }
+    }
+
+    /// Full draw: background + all windows + dock. Used for first render or major changes.
+    pub fn draw_full(&mut self, fb: &mut FramebufferManager) {
         let t = &theme::DARK;
 
-        // 1. Desktop background — render once, cache, then blit from cache
         if !self.bg_cached {
             // First time: render the expensive gradient + vignette
             renderer::draw_gradient_with_noise(fb, 0, 0, self.screen_w, self.screen_h,
@@ -233,29 +278,59 @@ impl Desktop {
             }
             self.bg_cached = true;
         } else {
-            // Fast path: blit cached background
-            for y in 0..self.screen_h {
-                for x in 0..self.screen_w {
-                    let idx = (y * self.screen_w + x) * 3;
-                    fb.set_pixel(x, y,
-                        self.bg_cache[idx],
-                        self.bg_cache[idx + 1],
-                        self.bg_cache[idx + 2]);
+            // Blit full cached background
+            let full = Rect::new(0, 0, self.screen_w, self.screen_h);
+            self.blit_bg_rect(fb, &full);
+        }
+
+        self.wm.draw(fb);
+        self.dock.draw(fb, self.screen_w, self.screen_h);
+
+        self.needs_full_redraw = false;
+        self.dirty_count = 0;
+    }
+
+    /// Partial draw: only repaint dirty rectangles. Much faster than full redraw.
+    fn draw_partial(&mut self, fb: &mut FramebufferManager) {
+        if self.dirty_count == 0 { return; }
+
+        // 1. Blit background cache over each dirty rect (erase old content)
+        for i in 0..self.dirty_count {
+            self.blit_bg_rect(fb, &self.dirty[i]);
+        }
+
+        // 2. Redraw windows that intersect any dirty rect (back to front)
+        for wi in (0..self.wm.count).rev() {
+            let slot = self.wm.order[wi];
+            if let Some(ref w) = self.wm.windows[slot] {
+                let wb = w.bounds_with_shadow();
+                let mut overlaps = false;
+                for i in 0..self.dirty_count {
+                    if wb.intersects(&self.dirty[i]) {
+                        overlaps = true;
+                        break;
+                    }
+                }
+                if overlaps {
+                    w.draw(fb);
                 }
             }
         }
 
-        // 2. Windows (back to front)
-        self.wm.draw(fb);
+        // 3. Redraw dock if any dirty rect overlaps it
+        let dock_y = self.screen_h.saturating_sub(theme::DARK.dock_h + theme::DARK.dock_margin + 10);
+        let dock_rect = Rect::new(0, dock_y, self.screen_w, self.screen_h - dock_y);
+        for i in 0..self.dirty_count {
+            if dock_rect.intersects(&self.dirty[i]) {
+                self.dock.draw(fb, self.screen_w, self.screen_h);
+                break;
+            }
+        }
 
-        // 3. Dock (always on top of windows)
-        self.dock.draw(fb, self.screen_w, self.screen_h);
-
-        self.needs_redraw = false;
+        self.dirty_count = 0;
     }
 
     /// Process raw mouse state from the PS/2 driver.
-    /// Called from the mouse IRQ path (via desktop::on_mouse_update).
     pub fn on_mouse(&mut self, x: usize, y: usize, buttons: u8) {
         let old_buttons = self.prev_buttons;
         self.prev_buttons = buttons;
@@ -263,10 +338,8 @@ impl Desktop {
         let left_now = buttons & 1 != 0;
         let left_was = old_buttons & 1 != 0;
 
-        // Generate events
         if left_now && !left_was {
             let ev = Event::MouseDown { x, y, button: MouseButton::Left };
-            // Process event but don't redraw (focus change is visual but not critical)
             self.wm.handle_event(&ev, self.screen_w, self.screen_h);
             self.dock.handle_event(&ev, self.screen_w, self.screen_h);
         }
@@ -274,7 +347,6 @@ impl Desktop {
         if !left_now && left_was {
             let ev = Event::MouseUp { x, y, button: MouseButton::Left };
             self.wm.handle_event(&ev, self.screen_w, self.screen_h);
-            // No redraw needed - drag end doesn't require immediate visual update
         }
 
         if x != self.mouse_x || y != self.mouse_y {
@@ -283,22 +355,31 @@ impl Desktop {
             let ev = Event::MouseMove { x, y };
 
             if self.wm.any_dragging() {
-                // Only redraw if drag actually moved the window
+                // Save old window bounds BEFORE the move
+                let old_bounds = self.wm.dragged_bounds_with_shadow();
+
+                // Process the drag (moves the window)
                 self.wm.handle_event(&ev, self.screen_w, self.screen_h);
-                self.needs_redraw = true;
+
+                // Mark old position + new position as dirty
+                if let Some(old_r) = old_bounds {
+                    self.mark_dirty(old_r);
+                }
+                if let Some(new_r) = self.wm.dragged_bounds_with_shadow() {
+                    self.mark_dirty(new_r);
+                }
             } else {
-                // No drag - just update hover state without redraw
                 self.dock.handle_event(&ev, self.screen_w, self.screen_h);
             }
         }
     }
 
     pub fn needs_redraw(&self) -> bool {
-        self.needs_redraw
+        self.needs_full_redraw || self.dirty_count > 0
     }
 
     pub fn request_redraw(&mut self) {
-        self.needs_redraw = true;
+        self.needs_full_redraw = true;
     }
 }
 
@@ -332,47 +413,50 @@ pub fn init() {
     crate::serial_println!("[desktop] GUI initialized ({}x{})", sw, sh);
 }
 
-/// Draw the desktop (called once at startup and on redraw).
+/// Draw the desktop (called once at startup).
 pub fn draw() {
     if let Some(ref mut fb) = *FRAMEBUFFER.lock() {
         if let Some(ref mut desktop) = *DESKTOP.lock() {
-            desktop.draw(fb);
-            // Redraw cursor on top (invalidates old backup since we just redrew everything)
+            desktop.draw_full(fb);
             renderer::redraw_cursor_on(fb, desktop.mouse_x, desktop.mouse_y);
         }
     }
 }
 
-/// Full redraw: background + windows + dock + cursor.
-/// Called from hlt_loop or timer when needs_redraw is true.
+/// Redraw only what changed. Uses dirty rects for drag, full redraw otherwise.
+/// Called from hlt_loop after each HLT wake.
 pub fn redraw_if_needed() {
-    // Check if redraw needed without holding FB lock
-    let needs = {
+    // Quick check without holding FB lock
+    let (needs_full, has_dirty) = {
         match DESKTOP.try_lock() {
             Some(guard) => match guard.as_ref() {
-                Some(d) => d.needs_redraw(),
-                None => false,
+                Some(d) => (d.needs_full_redraw, d.dirty_count > 0),
+                None => (false, false),
             },
-            None => false,
+            None => (false, false),
         }
     };
 
-    if needs {
-        let mut fb_guard = match FRAMEBUFFER.try_lock() {
-            Some(g) => g,
-            None => return,
-        };
-        let fb = match fb_guard.as_mut() {
-            Some(fb) => fb,
-            None => return,
-        };
-        let mut desk_guard = match DESKTOP.try_lock() {
-            Some(g) => g,
-            None => return,
-        };
-        if let Some(ref mut desktop) = *desk_guard {
-            desktop.draw(fb);
-            // Redraw cursor on top after full desktop redraw
+    if !needs_full && !has_dirty { return; }
+
+    let mut fb_guard = match FRAMEBUFFER.try_lock() {
+        Some(g) => g,
+        None => return,
+    };
+    let fb = match fb_guard.as_mut() {
+        Some(fb) => fb,
+        None => return,
+    };
+    let mut desk_guard = match DESKTOP.try_lock() {
+        Some(g) => g,
+        None => return,
+    };
+    if let Some(ref mut desktop) = *desk_guard {
+        if desktop.needs_full_redraw {
+            desktop.draw_full(fb);
+            renderer::redraw_cursor_on(fb, desktop.mouse_x, desktop.mouse_y);
+        } else if desktop.dirty_count > 0 {
+            desktop.draw_partial(fb);
             renderer::redraw_cursor_on(fb, desktop.mouse_x, desktop.mouse_y);
         }
     }

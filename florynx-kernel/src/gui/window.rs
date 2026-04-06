@@ -71,6 +71,13 @@ impl Window {
         Rect::new(self.x, self.y, self.w, self.h)
     }
 
+    /// Bounds expanded to include shadow layers (used by dirty-rect engine).
+    pub fn bounds_with_shadow(&self) -> Rect {
+        let t = &theme::DARK;
+        let extra = t.shadow_layers * 2 + 2;
+        Rect::new(self.x, self.y, self.w + extra, self.h + extra)
+    }
+
     pub fn titlebar_rect(&self) -> Rect {
         Rect::new(self.x, self.y, self.w, theme::DARK.titlebar_h)
     }
