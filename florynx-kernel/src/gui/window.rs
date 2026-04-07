@@ -191,6 +191,40 @@ impl Window {
                 }
                 false
             }
+            Event::KeyPress { key } => {
+                // Handle keyboard input when window is active
+                use crate::gui::event::Key;
+                match key {
+                    Key::Char(c) => {
+                        // Append character to content if there's space
+                        if self.content_len < MAX_CONTENT {
+                            self.content[self.content_len] = c as u8;
+                            self.content_len += 1;
+                            return true;
+                        }
+                    }
+                    Key::Backspace => {
+                        // Remove last character
+                        if self.content_len > 0 {
+                            self.content_len -= 1;
+                            return true;
+                        }
+                    }
+                    Key::Enter => {
+                        // Add newline
+                        if self.content_len < MAX_CONTENT {
+                            self.content[self.content_len] = b'\n';
+                            self.content_len += 1;
+                            return true;
+                        }
+                    }
+                    _ => {
+                        // Other keys not handled yet
+                        return false;
+                    }
+                }
+                false
+            }
             _ => false,
         }
     }

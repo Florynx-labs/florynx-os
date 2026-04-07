@@ -84,12 +84,22 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     florynx_kernel::launch_desktop();
 
     // =========================================================================
-    // Phase 6: Stable halt loop with GUI redraw
+    // Phase 6: Stable halt loop with GUI redraw (60 FPS frame limiter)
     // =========================================================================
-    serial_println!("[kernel] entering GUI hlt_loop");
+    serial_println!("[kernel] entering GUI hlt_loop (60 FPS)");
+    
+    const TARGET_FPS: u64 = 60;
+    const TICKS_PER_FRAME: u64 = 200 / TARGET_FPS; // 200 Hz / 60 FPS = ~3 ticks per frame
+    let mut last_frame_tick = florynx_kernel::time::clock::uptime_ticks();
+    
     loop {
         x86_64::instructions::hlt();
-        // After each interrupt wake, check if desktop needs redraw
-        florynx_kernel::gui::desktop::redraw_if_needed();
+        
+        // Only redraw if enough time has passed (frame limiter)
+        let current_tick = florynx_kernel::time::clock::uptime_ticks();
+        if current_tick - last_frame_tick >= TICKS_PER_FRAME {
+            florynx_kernel::gui::desktop::redraw_if_needed();
+            last_frame_tick = current_tick;
+        }
     }
 }

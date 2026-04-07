@@ -330,6 +330,23 @@ impl Desktop {
         self.dirty_count = 0;
     }
 
+    /// Process keyboard input from the PS/2 keyboard driver.
+    pub fn on_key(&mut self, key: crate::gui::event::Key) {
+        use crate::gui::event::Event;
+        
+        // Dispatch key event to the active window
+        if let Some(active_idx) = self.wm.active {
+            if let Some(ref mut win) = self.wm.windows[active_idx] {
+                let event = Event::KeyPress { key };
+                if win.handle_event(&event, self.screen_w, self.screen_h) {
+                    // Window consumed the key event, mark it dirty for redraw
+                    let bounds = win.bounds_with_shadow();
+                    self.mark_dirty(bounds);
+                }
+            }
+        }
+    }
+
     /// Process raw mouse state from the PS/2 driver.
     pub fn on_mouse(&mut self, x: usize, y: usize, buttons: u8) {
         let old_buttons = self.prev_buttons;
@@ -470,5 +487,16 @@ pub fn on_mouse_update(x: usize, y: usize, buttons: u8) {
     };
     if let Some(ref mut desktop) = *guard {
         desktop.on_mouse(x, y, buttons);
+    }
+}
+
+/// Called from keyboard IRQ handler to dispatch key events to the active window.
+pub fn on_key_press(key: crate::gui::event::Key) {
+    let mut guard = match DESKTOP.try_lock() {
+        Some(g) => g,
+        None => return,
+    };
+    if let Some(ref mut desktop) = *guard {
+        desktop.on_key(key);
     }
 }

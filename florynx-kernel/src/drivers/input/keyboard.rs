@@ -30,14 +30,40 @@ pub fn handle_keyboard_interrupt() {
     let mut keyboard = KEYBOARD.lock();
     if let Ok(Some(key_event)) = keyboard.add_byte(scancode) {
         if let Some(key) = keyboard.process_keyevent(key_event) {
-            match key {
+            // Convert pc-keyboard key to our GUI Key enum
+            let gui_key = match key {
                 DecodedKey::Unicode(character) => {
-                    crate::print!("{}", character);
+                    match character {
+                        '\x08' => crate::gui::event::Key::Backspace,
+                        '\n' | '\r' => crate::gui::event::Key::Enter,
+                        '\t' => crate::gui::event::Key::Tab,
+                        '\x1b' => crate::gui::event::Key::Escape,
+                        c => crate::gui::event::Key::Char(c),
+                    }
                 }
-                DecodedKey::RawKey(key) => {
-                    crate::serial_println!("[keyboard] raw key: {:?}", key);
+                DecodedKey::RawKey(raw) => {
+                    use pc_keyboard::KeyCode;
+                    match raw {
+                        KeyCode::ArrowUp => crate::gui::event::Key::ArrowUp,
+                        KeyCode::ArrowDown => crate::gui::event::Key::ArrowDown,
+                        KeyCode::ArrowLeft => crate::gui::event::Key::ArrowLeft,
+                        KeyCode::ArrowRight => crate::gui::event::Key::ArrowRight,
+                        KeyCode::Delete => crate::gui::event::Key::Delete,
+                        KeyCode::Home => crate::gui::event::Key::Home,
+                        KeyCode::End => crate::gui::event::Key::End,
+                        KeyCode::PageUp => crate::gui::event::Key::PageUp,
+                        KeyCode::PageDown => crate::gui::event::Key::PageDown,
+                        _ => {
+                            // Unhandled raw key, log and skip
+                            crate::serial_println!("[keyboard] unhandled raw key: {:?}", raw);
+                            return;
+                        }
+                    }
                 }
-            }
+            };
+
+            // Dispatch key event to desktop
+            crate::gui::desktop::on_key_press(gui_key);
         }
     }
 }

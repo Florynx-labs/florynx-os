@@ -51,7 +51,7 @@ impl Rect {
 }
 
 // ---------------------------------------------------------------------------
-// Mouse events
+// Input events
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,19 +61,40 @@ pub enum MouseButton {
     Middle,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Key {
+    Char(char),
+    Backspace,
+    Enter,
+    Tab,
+    Escape,
+    ArrowUp,
+    ArrowDown,
+    ArrowLeft,
+    ArrowRight,
+    Delete,
+    Home,
+    End,
+    PageUp,
+    PageDown,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum Event {
     MouseMove  { x: usize, y: usize },
     MouseDown  { x: usize, y: usize, button: MouseButton },
     MouseUp    { x: usize, y: usize, button: MouseButton },
+    KeyPress   { key: Key },
+    KeyRelease { key: Key },
 }
 
 impl Event {
-    pub fn position(&self) -> (usize, usize) {
+    pub fn position(&self) -> Option<(usize, usize)> {
         match *self {
-            Event::MouseMove { x, y } => (x, y),
-            Event::MouseDown { x, y, .. } => (x, y),
-            Event::MouseUp   { x, y, .. } => (x, y),
+            Event::MouseMove { x, y } => Some((x, y)),
+            Event::MouseDown { x, y, .. } => Some((x, y)),
+            Event::MouseUp   { x, y, .. } => Some((x, y)),
+            _ => None,
         }
     }
 }
