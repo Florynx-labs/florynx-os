@@ -170,8 +170,11 @@ extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFr
     // Increment the PIT tick counter
     crate::drivers::timer::pit::tick();
 
-    // Notify the scheduler (if running)
+    // Notify the old scheduler (if running)
     crate::process::scheduler::timer_tick();
+    
+    // Notify the new scheduler (v2)
+    crate::process::scheduler_v2::timer_tick();
 
     // Send End-Of-Interrupt to the PIC
     unsafe {

@@ -66,6 +66,9 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     florynx_kernel::fs::ramdisk::init();
     florynx_kernel::fs::vfs::init();
 
+    // Initialize scheduler
+    florynx_kernel::process::scheduler_v2::init();
+
     // =========================================================================
     // Phase 3: GUI initialization (heap is ready, interrupts still disabled)
     // =========================================================================
@@ -89,7 +92,27 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     florynx_kernel::launch_desktop();
 
     // =========================================================================
-    // Phase 6: Stable halt loop with GUI redraw (60 FPS frame limiter)
+    // Phase 6: Spawn test tasks and enable scheduler
+    // =========================================================================
+    serial_println!("[boot] phase 6: spawning test tasks...");
+    
+    // Spawn some test tasks
+    florynx_kernel::process::scheduler_v2::spawn("task_a", test_task_a);
+    florynx_kernel::process::scheduler_v2::spawn("task_b", test_task_b);
+    florynx_kernel::process::scheduler_v2::spawn_with_priority(
+        "high_priority_task",
+        test_task_high,
+        florynx_kernel::process::task::TaskPriority::High
+    );
+    
+    // Enable scheduler
+    florynx_kernel::process::scheduler_v2::enable();
+    
+    serial_println!("[boot] scheduler enabled with {} tasks", 
+        florynx_kernel::process::scheduler_v2::stats().total_tasks);
+
+    // =========================================================================
+    // Phase 7: Stable halt loop with GUI redraw (60 FPS frame limiter)
     // =========================================================================
     serial_println!("[kernel] entering GUI hlt_loop (60 FPS)");
     
@@ -107,4 +130,41 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
             last_frame_tick = current_tick;
         }
     }
+}
+
+// =============================================================================
+// Test Tasks for Scheduler
+// =============================================================================
+
+fn test_task_a() {
+    for i in 0..5 {
+        florynx_kernel::serial_println!("[task_a] iteration {}", i);
+        // Simulate work
+        for _ in 0..100000 {
+            core::hint::spin_loop();
+        }
+    }
+    florynx_kernel::serial_println!("[task_a] completed");
+}
+
+fn test_task_b() {
+    for i in 0..5 {
+        florynx_kernel::serial_println!("[task_b] iteration {}", i);
+        // Simulate work
+        for _ in 0..100000 {
+            core::hint::spin_loop();
+        }
+    }
+    florynx_kernel::serial_println!("[task_b] completed");
+}
+
+fn test_task_high() {
+    for i in 0..3 {
+        florynx_kernel::serial_println!("[high_priority_task] iteration {}", i);
+        // Simulate work
+        for _ in 0..50000 {
+            core::hint::spin_loop();
+        }
+    }
+    florynx_kernel::serial_println!("[high_priority_task] completed");
 }

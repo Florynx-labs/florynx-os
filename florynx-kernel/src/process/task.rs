@@ -45,6 +45,35 @@ pub enum TaskPriority {
     Realtime,
 }
 
+/// CPU context saved during context switch
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct CpuContext {
+    pub rsp: u64,  // Stack pointer
+    pub rbp: u64,  // Base pointer
+    pub rbx: u64,
+    pub r12: u64,
+    pub r13: u64,
+    pub r14: u64,
+    pub r15: u64,
+    pub rflags: u64,
+}
+
+impl CpuContext {
+    pub const fn new() -> Self {
+        CpuContext {
+            rsp: 0,
+            rbp: 0,
+            rbx: 0,
+            r12: 0,
+            r13: 0,
+            r14: 0,
+            r15: 0,
+            rflags: 0x202, // IF (interrupt flag) set
+        }
+    }
+}
+
 /// A kernel task — the basic unit of work in the scheduler.
 pub struct Task {
     /// Unique identifier.
@@ -59,6 +88,12 @@ pub struct Task {
     pub entry: fn(),
     /// Number of times this task has been scheduled.
     pub run_count: u64,
+    /// CPU context (saved registers)
+    pub context: CpuContext,
+    /// Stack pointer (top of kernel stack)
+    pub stack: Option<VirtAddr>,
+    /// Time slice remaining (in timer ticks)
+    pub time_slice: u64,
 }
 
 impl Task {
@@ -71,6 +106,9 @@ impl Task {
             priority: TaskPriority::Normal,
             entry,
             run_count: 0,
+            context: CpuContext::new(),
+            stack: None,
+            time_slice: 10, // Default 10 ticks
         }
     }
 
@@ -83,6 +121,14 @@ impl Task {
             priority,
             entry,
             run_count: 0,
+            context: CpuContext::new(),
+            stack: None,
+            time_slice: match priority {
+                TaskPriority::Low => 5,
+                TaskPriority::Normal => 10,
+                TaskPriority::High => 20,
+                TaskPriority::Realtime => 50,
+            },
         }
     }
 }
