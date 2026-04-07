@@ -421,9 +421,14 @@ pub fn init() {
     let mut desktop = Desktop::new(sw, sh);
 
     // Create a welcome window
-    let mut win = Window::new(0, sw / 2 - 220, sh / 2 - 170, 440, 320, "Welcome to FlorynxOS");
-    win.set_content("Florynx OS v0.2\n\nBioluminescent desktop shell\nbuilt from scratch in Rust.\n\nDrag this window around!");
+    let mut win = Window::new(0, 50, 50, 440, 280, "Welcome to FlorynxOS");
+    win.set_content("Florynx OS v0.2.4\n\nBioluminescent desktop shell\nbuilt from scratch in Rust.\n\nFeatures:\n- Keyboard input\n- Text editor\n- Button widgets\n- Drag windows around!\n\nType in the active window!");
     desktop.add_window(win);
+
+    // Create a text editor window
+    let mut editor_win = Window::new(0, sw / 2 - 250, sh / 2 - 200, 500, 400, "Text Editor");
+    editor_win.set_content("Type here to test keyboard input!\nPress Enter for new lines.\nBackspace to delete.");
+    desktop.add_window(editor_win);
 
     *DESKTOP.lock() = Some(desktop);
 

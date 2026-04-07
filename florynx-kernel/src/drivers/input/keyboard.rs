@@ -53,8 +53,20 @@ pub fn handle_keyboard_interrupt() {
                         KeyCode::End => crate::gui::event::Key::End,
                         KeyCode::PageUp => crate::gui::event::Key::PageUp,
                         KeyCode::PageDown => crate::gui::event::Key::PageDown,
+                        // Silently ignore modifier keys and other non-character keys
+                        KeyCode::LShift | KeyCode::RShift |
+                        KeyCode::LControl | KeyCode::RControl |
+                        KeyCode::LAlt | KeyCode::RAltGr |
+                        KeyCode::LWin | KeyCode::RWin |
+                        KeyCode::CapsLock | KeyCode::NumpadLock | KeyCode::ScrollLock |
+                        KeyCode::F1 | KeyCode::F2 | KeyCode::F3 | KeyCode::F4 |
+                        KeyCode::F5 | KeyCode::F6 | KeyCode::F7 | KeyCode::F8 |
+                        KeyCode::F9 | KeyCode::F10 | KeyCode::F11 | KeyCode::F12 |
+                        KeyCode::Insert | KeyCode::PauseBreak | KeyCode::PrintScreen => {
+                            return; // Silently ignore
+                        }
                         _ => {
-                            // Unhandled raw key, log and skip
+                            // Other unhandled keys - log for debugging
                             crate::serial_println!("[keyboard] unhandled raw key: {:?}", raw);
                             return;
                         }

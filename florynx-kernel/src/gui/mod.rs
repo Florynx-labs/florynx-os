@@ -19,3 +19,5 @@ pub mod dock;
 pub mod desktop;
 pub mod console;
 pub mod icons;
+pub mod widgets;
+pub mod text_editor;

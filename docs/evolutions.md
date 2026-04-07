@@ -58,6 +58,24 @@ All changes below are **merged, tested, and pushed** to `main`.
 
 **Performance Impact**: Frame limiter reduces CPU usage by ~70% while maintaining smooth 60 FPS.
 
+## v0.2.4 Widget System & Phase 4 Components
+
+| # | Change | Files Modified | Commit |
+|---|--------|---------------|--------|
+| 30 | **Button widget**: clickable buttons with hover/pressed/normal states | `gui/widgets/button.rs` (new) | v0.2.4 |
+| 31 | **TextInput widget**: single-line text field with cursor, selection, arrow key navigation | `gui/widgets/text_input.rs` (new) | v0.2.4 |
+| 32 | **Panel widget**: container for layout management (vertical/horizontal) | `gui/widgets/panel.rs` (new) | v0.2.4 |
+| 33 | **Text editor**: multi-line editor with toolbar, line numbers, save/clear buttons | `gui/text_editor.rs` (new) | v0.2.4 |
+| 34 | **Keyboard fix**: silently ignore modifier keys (Shift, Ctrl, Alt, AltGr, F-keys) | `drivers/input/keyboard.rs` | v0.2.4 |
+| 35 | **Desktop windows**: added text editor window + improved welcome window | `gui/desktop.rs` | v0.2.4 |
+| 36 | **Widgets module**: created `gui/widgets/mod.rs` with Button, TextInput, Panel exports | `gui/widgets/mod.rs` (new) | v0.2.4 |
+
+**Widget Features**:
+- **Button**: Hover effects, click detection, disabled state, rounded corners
+- **TextInput**: Blinking cursor, insert/delete, arrow keys, Home/End navigation
+- **Panel**: Layout containers with padding/spacing, vertical/horizontal modes
+- **Text Editor**: Multi-line editing, line numbers, toolbar with buttons
+
 ---
 
 # 2. Prioritized Task Backlog
