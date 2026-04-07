@@ -24,7 +24,6 @@ pub struct MouseState {
     pub buttons: u8,
     cycle: u8,
     packet: [u8; 3],
-    irq_count: u32,
 }
 
 impl MouseState {
@@ -35,7 +34,6 @@ impl MouseState {
             buttons: 0,
             cycle: 0,
             packet: [0; 3],
-            irq_count: 0,
         }
     }
 

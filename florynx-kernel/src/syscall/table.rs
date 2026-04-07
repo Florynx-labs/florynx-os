@@ -19,14 +19,20 @@ pub const SYS_GETPID: u64 = 39;
 /// Sleep for a duration (in ticks).
 pub const SYS_SLEEP: u64 = 35;
 
-/// Open a file (stub).
+/// Open a file.
 pub const SYS_OPEN: u64 = 2;
 
-/// Close a file (stub).
+/// Close a file.
 pub const SYS_CLOSE: u64 = 3;
 
-/// Read from a file (stub).
+/// Read from a file.
 pub const SYS_READ: u64 = 0;
 
-/// Memory map (stub).
-pub const SYS_MMAP: u64 = 9;
+/// Seek in a file.
+pub const SYS_SEEK: u64 = 8;
+
+/// Create a directory.
+pub const SYS_MKDIR: u64 = 83;
+
+/// Get file statistics.
+pub const SYS_STAT: u64 = 4;

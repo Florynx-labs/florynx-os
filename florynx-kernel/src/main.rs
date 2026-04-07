@@ -67,7 +67,10 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     florynx_kernel::fs::vfs::init();
 
     // Initialize scheduler
-    florynx_kernel::process::scheduler_v2::init();
+    florynx_kernel::process::scheduler::init();
+
+    // Initialize syscall interface
+    florynx_kernel::syscall::init();
 
     // =========================================================================
     // Phase 3: GUI initialization (heap is ready, interrupts still disabled)
@@ -97,19 +100,19 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     serial_println!("[boot] phase 6: spawning test tasks...");
     
     // Spawn some test tasks
-    florynx_kernel::process::scheduler_v2::spawn("task_a", test_task_a);
-    florynx_kernel::process::scheduler_v2::spawn("task_b", test_task_b);
-    florynx_kernel::process::scheduler_v2::spawn_with_priority(
+    florynx_kernel::process::scheduler::spawn("task_a", test_task_a);
+    florynx_kernel::process::scheduler::spawn("task_b", test_task_b);
+    florynx_kernel::process::scheduler::spawn_with_priority(
         "high_priority_task",
         test_task_high,
         florynx_kernel::process::task::TaskPriority::High
     );
     
     // Enable scheduler
-    florynx_kernel::process::scheduler_v2::enable();
+    florynx_kernel::process::scheduler::enable();
     
     serial_println!("[boot] scheduler enabled with {} tasks", 
-        florynx_kernel::process::scheduler_v2::stats().total_tasks);
+        florynx_kernel::process::scheduler::stats().total_tasks);
 
     // =========================================================================
     // Phase 7: Stable halt loop with GUI redraw (60 FPS frame limiter)

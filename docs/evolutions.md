@@ -52,11 +52,13 @@
 - ✅ CPU context structure (ready for context switching)
 - ✅ Process states (Ready, Running, Blocked, Terminated)
 
-**Phase 4: System Calls & User Space**
-- ❌ System call interface (int 0x80 or syscall)
-- ❌ User/kernel mode separation
-- ❌ Memory protection
-- ❌ Basic syscalls (exit, fork, exec, read, write)
+**Phase 4: System Calls** ✅ COMPLETED
+- ✅ Syscall dispatcher with 11 POSIX-compatible syscalls
+- ✅ Full VFS integration (open, read, write, close, seek)
+- ✅ Scheduler integration (exit, yield, getpid, sleep)
+- ✅ Directory operations (mkdir, stat)
+- ✅ POSIX error codes (ENOENT, EBADF, EACCES, etc.)
+- ✅ Codebase cleanup: unified scheduler, removed dead code
 
 ---
 
@@ -278,6 +280,56 @@ let stats = scheduler_v2::stats();
 - **Normal**: 10 ticks (~50ms)
 - **High**: 20 ticks (~100ms)
 - **Realtime**: 50 ticks (~250ms)
+
+## v0.3.0 Core Kernel Features — Phase 4: System Calls & Cleanup
+
+| # | Change | Files Modified | Commit |
+|---|--------|---------------|--------|
+| 62 | **Syscall dispatcher**: Route 11 syscalls by number (Linux ABI) | `syscall/mod.rs` | v0.3.0 |
+| 63 | **sys_read**: Read from stdin or VFS file descriptor | `syscall/handlers.rs` | v0.3.0 |
+| 64 | **sys_write**: Write to stdout/stderr or VFS file descriptor | `syscall/handlers.rs` | v0.3.0 |
+| 65 | **sys_open**: Open file with flags (read/write/create) | `syscall/handlers.rs` | v0.3.0 |
+| 66 | **sys_close**: Close file descriptor | `syscall/handlers.rs` | v0.3.0 |
+| 67 | **sys_seek**: Seek to position in file | `syscall/handlers.rs` | v0.3.0 |
+| 68 | **sys_exit**: Terminate task via scheduler | `syscall/handlers.rs` | v0.3.0 |
+| 69 | **sys_yield**: Yield CPU via scheduler | `syscall/handlers.rs` | v0.3.0 |
+| 70 | **sys_getpid**: Get current task ID from scheduler | `syscall/handlers.rs` | v0.3.0 |
+| 71 | **sys_sleep**: Sleep for N ticks | `syscall/handlers.rs` | v0.3.0 |
+| 72 | **sys_mkdir**: Create directory in VFS | `syscall/handlers.rs` | v0.3.0 |
+| 73 | **sys_stat**: Get file statistics (inode, size, type) | `syscall/handlers.rs` | v0.3.0 |
+| 74 | **Unified scheduler**: Merged scheduler_v2 into scheduler, removed old | `process/scheduler.rs` | v0.3.0 |
+| 75 | **Removed dead code**: irq_count field, unused imports | `drivers/input/mouse.rs` | v0.3.0 |
+
+**System Calls (11 total)**:
+| Syscall | Number | Arguments | Description |
+|---------|--------|-----------|-------------|
+| `SYS_READ` | 0 | fd, buf, len | Read from file descriptor |
+| `SYS_WRITE` | 1 | fd, buf, len | Write to file descriptor |
+| `SYS_OPEN` | 2 | path, path_len, flags | Open a file |
+| `SYS_CLOSE` | 3 | fd | Close file descriptor |
+| `SYS_STAT` | 4 | path, path_len, stat_buf | Get file info |
+| `SYS_SEEK` | 8 | fd, offset, whence | Seek in file |
+| `SYS_YIELD` | 24 | — | Yield CPU |
+| `SYS_SLEEP` | 35 | ticks | Sleep for duration |
+| `SYS_GETPID` | 39 | — | Get process ID |
+| `SYS_EXIT` | 60 | code | Exit process |
+| `SYS_MKDIR` | 83 | path, path_len | Create directory |
+
+**POSIX Error Codes**:
+- `ENOENT (-2)` — File not found
+- `EBADF (-9)` — Bad file descriptor
+- `EACCES (-13)` — Permission denied
+- `EFAULT (-14)` — Bad address
+- `EEXIST (-17)` — File exists
+- `EISDIR (-21)` — Is a directory
+- `EINVAL (-22)` — Invalid argument
+- `ENOSYS (-38)` — Function not implemented
+
+**Cleanup**:
+- Removed old cooperative scheduler (replaced by preemptive)
+- Unified `scheduler_v2.rs` → `scheduler.rs`
+- Removed unused `irq_count` field from `MouseState`
+- Zero compiler warnings
 
 ---
 

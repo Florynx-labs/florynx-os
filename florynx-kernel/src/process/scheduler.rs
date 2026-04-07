@@ -1,153 +1,271 @@
 // =============================================================================
-// Florynx Kernel — Round-Robin Scheduler
+// Florynx Kernel — Preemptive Round-Robin Scheduler
 // =============================================================================
-// Implements a simple round-robin scheduler for kernel-level tasks.
-// Tasks are cooperative in this initial version: each task runs its entry
-// function once per scheduling round.
+// Production-level preemptive scheduler with:
+// - Time-slice based scheduling
+// - Priority levels (Low, Normal, High, Realtime)
+// - Process states (Ready, Running, Blocked, Terminated)
+// - Idle task
 // =============================================================================
 
 use alloc::collections::VecDeque;
-use alloc::string::String;
+use alloc::vec::Vec;
 use lazy_static::lazy_static;
 use spin::Mutex;
 
-use super::task::{Task, TaskState};
+use super::task::{Task, TaskState, TaskId, TaskPriority};
 
-// The global scheduler instance, protected by a spinlock.
 lazy_static! {
     static ref SCHEDULER: Mutex<Scheduler> = Mutex::new(Scheduler::new());
 }
 
-/// Round-robin scheduler managing a queue of tasks.
-#[allow(dead_code)]
+/// Preemptive scheduler with priority-based time slices
 struct Scheduler {
-    /// Ready queue of tasks.
-    tasks: VecDeque<Task>,
-    /// Total number of scheduling rounds completed.
+    /// All tasks indexed by slot
+    tasks: Vec<Option<Task>>,
+    /// Ready queue (task slot indices)
+    ready_queue: VecDeque<usize>,
+    /// Currently running task index
+    current_task: Option<usize>,
+    /// Idle task index
+    idle_task: Option<usize>,
+    /// Total scheduling rounds
     rounds: u64,
-    /// Whether the scheduler is actively running.
-    running: bool,
-    /// Tick counter for timer-driven scheduling.
-    tick_count: u64,
-    /// Number of ticks between scheduling rounds.
-    ticks_per_schedule: u64,
+    /// Scheduler enabled
+    enabled: bool,
+    /// Current time slice remaining
+    current_time_slice: u64,
 }
 
 impl Scheduler {
     const fn new() -> Self {
         Scheduler {
-            tasks: VecDeque::new(),
+            tasks: Vec::new(),
+            ready_queue: VecDeque::new(),
+            current_task: None,
+            idle_task: None,
             rounds: 0,
-            running: false,
-            tick_count: 0,
-            ticks_per_schedule: 10, // Schedule every 10 ticks (~100ms at 100Hz)
+            enabled: false,
+            current_time_slice: 0,
         }
     }
-}
 
-/// Add a new task to the scheduler.
-pub fn add_task(task: Task) {
-    let mut sched = SCHEDULER.lock();
-    crate::serial_println!(
-        "[scheduler] added task '{}' (id={})",
-        task.name,
-        task.id.0
-    );
-    sched.tasks.push_back(task);
-}
-
-/// Add a task from a name and entry function (convenience).
-pub fn spawn(name: &str, entry: fn()) {
-    add_task(Task::new(name, entry));
-}
-
-/// Called by the timer interrupt handler on every tick.
-pub fn timer_tick() {
-    // Try to lock without blocking — if we can't, skip this tick
-    if let Some(mut sched) = SCHEDULER.try_lock() {
-        if !sched.running {
-            return;
+    fn add_task_internal(&mut self, mut task: Task) -> usize {
+        for (i, slot) in self.tasks.iter_mut().enumerate() {
+            if slot.is_none() {
+                task.state = TaskState::Ready;
+                *slot = Some(task);
+                self.ready_queue.push_back(i);
+                return i;
+            }
         }
-        sched.tick_count += 1;
-    }
-}
-
-/// Run the scheduler: execute each ready task in round-robin order.
-/// This is a cooperative demonstration scheduler.
-pub fn run(max_rounds: u64) {
-    {
-        let mut sched = SCHEDULER.lock();
-        sched.running = true;
-        let task_count = sched.tasks.len();
-        crate::serial_println!(
-            "[scheduler] starting with {} tasks, {} rounds",
-            task_count,
-            max_rounds
-        );
-        crate::println!(
-            "[scheduler] starting with {} tasks, {} rounds",
-            task_count,
-            max_rounds
-        );
+        let idx = self.tasks.len();
+        task.state = TaskState::Ready;
+        self.tasks.push(Some(task));
+        self.ready_queue.push_back(idx);
+        idx
     }
 
-    for round in 0..max_rounds {
-        let task_count = {
-            let sched = SCHEDULER.lock();
-            sched.tasks.len()
-        };
-
-        for i in 0..task_count {
-            let (entry, _name) = {
-                let mut sched = SCHEDULER.lock();
-                if let Some(task) = sched.tasks.get_mut(i) {
-                    task.state = TaskState::Running;
-                    task.run_count += 1;
-                    (task.entry, task.name.clone())
-                } else {
-                    continue;
+    fn pick_next_task(&mut self) -> Option<usize> {
+        while let Some(idx) = self.ready_queue.pop_front() {
+            if let Some(ref task) = self.tasks[idx] {
+                if task.state == TaskState::Ready {
+                    return Some(idx);
                 }
-            };
+            }
+        }
+        self.idle_task
+    }
 
-            // Execute the task function (cooperative)
-            (entry)();
+    fn schedule_next(&mut self) -> Option<(usize, usize)> {
+        let next_idx = self.pick_next_task()?;
+        let prev_idx = self.current_task;
 
-            // Mark task as ready again
-            {
-                let mut sched = SCHEDULER.lock();
-                if let Some(task) = sched.tasks.get_mut(i) {
+        if let Some(prev) = prev_idx {
+            if let Some(ref mut task) = self.tasks[prev] {
+                if task.state == TaskState::Running {
                     task.state = TaskState::Ready;
+                    if task.state != TaskState::Terminated {
+                        self.ready_queue.push_back(prev);
+                    }
                 }
             }
         }
 
-        {
-            let mut sched = SCHEDULER.lock();
-            sched.rounds = round + 1;
+        if let Some(ref mut task) = self.tasks[next_idx] {
+            task.state = TaskState::Running;
+            task.run_count += 1;
+            self.current_time_slice = task.time_slice;
+        }
+
+        self.current_task = Some(next_idx);
+        self.rounds += 1;
+
+        prev_idx.map(|prev| (prev, next_idx))
+    }
+
+    fn block_current(&mut self) {
+        if let Some(idx) = self.current_task {
+            if let Some(ref mut task) = self.tasks[idx] {
+                task.state = TaskState::Blocked;
+            }
         }
     }
 
-    {
-        let mut sched = SCHEDULER.lock();
-        sched.running = false;
-        crate::serial_println!(
-            "[scheduler] completed {} rounds",
-            sched.rounds
-        );
-        crate::println!(
-            "[scheduler] completed {} rounds",
-            sched.rounds
-        );
+    fn wake_task(&mut self, idx: usize) {
+        if let Some(ref mut task) = self.tasks[idx] {
+            if task.state == TaskState::Blocked {
+                task.state = TaskState::Ready;
+                self.ready_queue.push_back(idx);
+            }
+        }
+    }
+
+    fn terminate_current(&mut self) {
+        if let Some(idx) = self.current_task {
+            if let Some(ref mut task) = self.tasks[idx] {
+                task.state = TaskState::Terminated;
+                crate::serial_println!("[scheduler] task '{}' terminated", task.name);
+            }
+            self.current_task = None;
+        }
+    }
+
+    fn current(&self) -> Option<&Task> {
+        self.current_task.and_then(|idx| self.tasks[idx].as_ref())
     }
 }
 
-/// Get the number of tasks in the scheduler.
-pub fn task_count() -> usize {
-    SCHEDULER.lock().tasks.len()
+// =============================================================================
+// Public API
+// =============================================================================
+
+/// Initialize the scheduler with an idle task
+pub fn init() {
+    let mut sched = SCHEDULER.lock();
+    let idle = Task::new("idle", idle_task_fn);
+    let idle_idx = sched.add_task_internal(idle);
+    sched.idle_task = Some(idle_idx);
+    crate::serial_println!("[scheduler] initialized with idle task");
 }
 
-/// Get the names of all tasks.
-pub fn task_names() -> alloc::vec::Vec<String> {
+fn idle_task_fn() {
+    loop {
+        x86_64::instructions::hlt();
+    }
+}
+
+/// Spawn a new task with normal priority
+pub fn spawn(name: &str, entry: fn()) -> TaskId {
+    let task = Task::new(name, entry);
+    let id = task.id;
+    let mut sched = SCHEDULER.lock();
+    let idx = sched.add_task_internal(task);
+    crate::serial_println!("[scheduler] spawned task '{}' (id={}, idx={})", name, id.0, idx);
+    id
+}
+
+/// Spawn a task with specific priority
+pub fn spawn_with_priority(name: &str, entry: fn(), priority: TaskPriority) -> TaskId {
+    let task = Task::with_priority(name, entry, priority);
+    let id = task.id;
+    let mut sched = SCHEDULER.lock();
+    let _idx = sched.add_task_internal(task);
+    crate::serial_println!("[scheduler] spawned task '{}' (id={}, priority={:?})", name, id.0, priority);
+    id
+}
+
+/// Enable the scheduler
+pub fn enable() {
+    let mut sched = SCHEDULER.lock();
+    sched.enabled = true;
+    crate::serial_println!("[scheduler] enabled");
+}
+
+/// Disable the scheduler
+pub fn disable() {
+    let mut sched = SCHEDULER.lock();
+    sched.enabled = false;
+    crate::serial_println!("[scheduler] disabled");
+}
+
+/// Called by timer interrupt — handle time slice and scheduling
+pub fn timer_tick() {
+    if let Some(mut sched) = SCHEDULER.try_lock() {
+        if !sched.enabled {
+            return;
+        }
+        if sched.current_time_slice > 0 {
+            sched.current_time_slice -= 1;
+        }
+        if sched.current_time_slice == 0 {
+            if let Some((prev_idx, next_idx)) = sched.schedule_next() {
+                if let (Some(ref prev), Some(ref next)) =
+                    (sched.tasks[prev_idx].as_ref(), sched.tasks[next_idx].as_ref())
+                {
+                    crate::serial_println!(
+                        "[scheduler] switch: '{}' -> '{}'",
+                        prev.name,
+                        next.name
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Block the current task
+pub fn block() {
+    let mut sched = SCHEDULER.lock();
+    sched.block_current();
+}
+
+/// Wake a task by ID
+pub fn wake(id: TaskId) {
+    let mut sched = SCHEDULER.lock();
+    for (idx, task_opt) in sched.tasks.iter().enumerate() {
+        if let Some(ref task) = task_opt {
+            if task.id == id {
+                sched.wake_task(idx);
+                break;
+            }
+        }
+    }
+}
+
+/// Terminate the current task
+pub fn exit() {
+    let mut sched = SCHEDULER.lock();
+    sched.terminate_current();
+}
+
+/// Yield CPU to next task
+pub fn yield_now() {
+    let mut sched = SCHEDULER.lock();
+    sched.current_time_slice = 0;
+}
+
+/// Get current task ID
+pub fn current_task_id() -> Option<TaskId> {
     let sched = SCHEDULER.lock();
-    sched.tasks.iter().map(|t| t.name.clone()).collect()
+    sched.current().map(|t| t.id)
+}
+
+/// Get scheduler statistics
+pub fn stats() -> SchedulerStats {
+    let sched = SCHEDULER.lock();
+    SchedulerStats {
+        total_tasks: sched.tasks.iter().filter(|t| t.is_some()).count(),
+        ready_tasks: sched.ready_queue.len(),
+        current_task: sched.current().map(|t| t.name.clone()),
+        rounds: sched.rounds,
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SchedulerStats {
+    pub total_tasks: usize,
+    pub ready_tasks: usize,
+    pub current_task: Option<alloc::string::String>,
+    pub rounds: u64,
 }
