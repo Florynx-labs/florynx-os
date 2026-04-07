@@ -62,9 +62,10 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
         .expect("heap initialization failed");
     serial_println!("[boot] heap initialized");
 
-    // Initialize VFS and ramdisk
+    // Initialize VFS, ramdisk, and devfs
     florynx_kernel::fs::ramdisk::init();
     florynx_kernel::fs::vfs::init();
+    florynx_kernel::fs::devfs::init();
 
     // Initialize scheduler
     florynx_kernel::process::scheduler::init();

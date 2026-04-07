@@ -60,6 +60,14 @@
 - ✅ POSIX error codes (ENOENT, EBADF, EACCES, etc.)
 - ✅ Codebase cleanup: unified scheduler, removed dead code
 
+**Phase 5: Security & DevFS** ✅ COMPLETED
+- ✅ Capability system (18 bitflag capabilities)
+- ✅ CapabilitySet with presets (kernel, user, sandboxed)
+- ✅ Capability enforcement (check_capability + CapError)
+- ✅ Task-level capabilities (every task carries a CapabilitySet)
+- ✅ Audit log (256-entry ring buffer, serial output on denials)
+- ✅ devfs: /dev/null, /dev/zero, /dev/serial0
+
 ---
 
 # 1. Completed Modifications (v0.1 → v0.2)
@@ -330,6 +338,48 @@ let stats = scheduler_v2::stats();
 - Unified `scheduler_v2.rs` → `scheduler.rs`
 - Removed unused `irq_count` field from `MouseState`
 - Zero compiler warnings
+
+## v0.3.0 Core Kernel Features — Phase 5: Security & DevFS
+
+| # | Change | Files Modified | Commit |
+|---|--------|---------------|--------|
+| 76 | **Capability bitflags**: 18 capabilities (FS, PROC, GUI, NET, HW, IPC, CLOCK, MEM, ADMIN) | `security/capability.rs` | v0.3.0 |
+| 77 | **CapabilitySet**: Grant/revoke/merge/intersect, presets (kernel, user, sandboxed) | `security/capability.rs` | v0.3.0 |
+| 78 | **check_capability()**: Enforcement function returning CapError on denial | `security/capability.rs` | v0.3.0 |
+| 79 | **Task capabilities**: Every task carries a CapabilitySet, has_cap() check | `process/task.rs` | v0.3.0 |
+| 80 | **Audit log**: Ring buffer (256 entries), logs denied caps, syscalls, spawns, exits | `security/audit.rs` (new) | v0.3.0 |
+| 81 | **devfs**: /dev/null, /dev/zero, /dev/serial0 virtual devices | `fs/devfs.rs` (new) | v0.3.0 |
+| 82 | **CapabilityTable**: Legacy compat wrapper for process.rs | `security/capability.rs` | v0.3.0 |
+
+**Capability System (18 capabilities)**:
+| Category | Capabilities |
+|----------|-------------|
+| Filesystem | `FS_READ`, `FS_WRITE`, `FS_CREATE`, `FS_DELETE` |
+| Process | `PROC_SPAWN`, `PROC_KILL` |
+| GUI | `GUI_WINDOW`, `GUI_INPUT` |
+| Network | `NET_LISTEN`, `NET_CONNECT` |
+| Hardware | `HW_IO`, `HW_IRQ` |
+| IPC | `IPC_SEND`, `IPC_RECV` |
+| Clock | `CLOCK_READ`, `CLOCK_SET` |
+| Memory | `MEM_MAP`, `MEM_ALLOC` |
+| Admin | `ADMIN` |
+
+**Capability Presets**:
+- **kernel()**: All bits set (u64::MAX) — full access
+- **user_default()**: FS_READ + FS_WRITE + GUI + IPC + CLOCK_READ
+- **sandboxed()**: FS_READ + GUI_INPUT + CLOCK_READ only
+- **empty()**: No permissions
+
+**Audit Log**:
+- 256-entry ring buffer (overwrites oldest)
+- Events: CapabilityDenied, SyscallDenied, InvalidAccess, TaskSpawned, TaskTerminated
+- `dump_recent(n)` for debugging
+- Serial output on denials
+
+**Device Files**:
+- `/dev/null` — swallows all writes, returns EOF on read
+- `/dev/zero` — returns zeros on read, rejects writes
+- `/dev/serial0` — writes to UART serial port
 
 ---
 

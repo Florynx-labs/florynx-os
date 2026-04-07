@@ -4,3 +4,4 @@
 
 pub mod capability;
 pub mod isolation;
+pub mod audit;

@@ -8,6 +8,7 @@
 use alloc::string::String;
 use core::sync::atomic::{AtomicU64, Ordering};
 use x86_64::{VirtAddr, PhysAddr};
+use crate::security::capability::CapabilitySet;
 
 /// Unique task identifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -94,6 +95,8 @@ pub struct Task {
     pub stack: Option<VirtAddr>,
     /// Time slice remaining (in timer ticks)
     pub time_slice: u64,
+    /// Capability set for this task
+    pub capabilities: CapabilitySet,
 }
 
 impl Task {
@@ -109,6 +112,7 @@ impl Task {
             context: CpuContext::new(),
             stack: None,
             time_slice: 10, // Default 10 ticks
+            capabilities: CapabilitySet::kernel(), // Kernel tasks get all caps
         }
     }
 
@@ -129,7 +133,13 @@ impl Task {
                 TaskPriority::High => 20,
                 TaskPriority::Realtime => 50,
             },
+            capabilities: CapabilitySet::kernel(),
         }
+    }
+
+    /// Check if this task has a specific capability.
+    pub fn has_cap(&self, cap: crate::security::capability::Capability) -> bool {
+        self.capabilities.has(cap)
     }
 }
 
