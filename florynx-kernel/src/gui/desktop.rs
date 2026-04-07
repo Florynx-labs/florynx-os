@@ -76,7 +76,7 @@ impl WindowManager {
     }
 
     /// Bring a window to the front of the z-order.
-    fn bring_to_front(&mut self, slot: usize) {
+    fn bring_to_front(&mut self, slot: usize) -> bool {
         // Find position in order
         let mut pos = None;
         for i in 0..self.count {
@@ -85,7 +85,9 @@ impl WindowManager {
                 break;
             }
         }
-        if let Some(p) = pos {
+        
+        let changed = if let Some(p) = pos {
+            if p == 0 { return false; } // Already at front
             // Shift left from front to p, then place at front
             let val = self.order[p];
             let mut i = p;
@@ -94,7 +96,10 @@ impl WindowManager {
                 i -= 1;
             }
             self.order[0] = val;
-        }
+            true
+        } else {
+            false
+        };
 
         // Update active
         if let Some(ai) = self.active {
@@ -106,6 +111,7 @@ impl WindowManager {
             w.active = true;
         }
         self.active = Some(slot);
+        changed
     }
 
     /// Draw all windows back-to-front.
@@ -136,7 +142,10 @@ impl WindowManager {
         if let Some(slot) = consumed_slot {
             // If this was a mouse-down, bring window to front
             if matches!(event, Event::MouseDown { .. }) && self.active != Some(slot) {
-                self.bring_to_front(slot);
+                if self.bring_to_front(slot) {
+                    // Window brought to front, will be redrawn
+                    return true;
+                }
             }
             return true;
         }
@@ -357,8 +366,17 @@ impl Desktop {
 
         if left_now && !left_was {
             let ev = Event::MouseDown { x, y, button: MouseButton::Left };
+            
+            // Check dock first
+            if let Some(icon_idx) = self.dock.handle_event(&ev, self.screen_w, self.screen_h) {
+                // Dock icon clicked - create window based on icon
+                self.on_dock_click(icon_idx);
+                self.needs_full_redraw = true;
+                return;
+            }
+            
+            // Then check windows
             self.wm.handle_event(&ev, self.screen_w, self.screen_h);
-            self.dock.handle_event(&ev, self.screen_w, self.screen_h);
         }
 
         if !left_now && left_was {
@@ -386,6 +404,7 @@ impl Desktop {
                     self.mark_dirty(new_r);
                 }
             } else {
+                // Update dock hover state
                 self.dock.handle_event(&ev, self.screen_w, self.screen_h);
             }
         }
@@ -397,6 +416,57 @@ impl Desktop {
 
     pub fn request_redraw(&mut self) {
         self.needs_full_redraw = true;
+    }
+
+    /// Handle dock icon click - create appropriate window
+    fn on_dock_click(&mut self, icon_idx: usize) {
+        use crate::gui::window::Window;
+        
+        let (x, y) = (100 + icon_idx * 30, 100 + icon_idx * 30);
+        
+        let win = match icon_idx {
+            0 => {
+                // Files icon
+                let mut w = Window::new(0, x, y, 500, 400, "Files");
+                w.set_content("File Manager\n\nBrowse your files here.\n\n(VFS not yet implemented)");
+                w
+            }
+            1 => {
+                // Terminal icon
+                let mut w = Window::new(0, x, y, 600, 400, "Terminal");
+                w.set_content("Florynx Terminal\n\n$ Welcome to FlorynxOS\n$ Type commands here\n\n(Shell not yet implemented)");
+                w
+            }
+            2 => {
+                // Settings icon
+                let mut w = Window::new(0, x, y, 450, 350, "Settings");
+                w.set_content("System Settings\n\nConfigure your system:\n- Display\n- Keyboard\n- Mouse\n- Network\n\n(Settings panel coming soon)");
+                w
+            }
+            3 => {
+                // Monitor icon
+                let mut w = Window::new(0, x, y, 500, 400, "System Monitor");
+                w.set_content("System Monitor\n\nCPU: AMD64\nMemory: 4 MiB heap\nUptime: Running\n\n(Real-time stats coming soon)");
+                w
+            }
+            4 => {
+                // Notes/Document icon
+                let mut w = Window::new(0, x, y, 500, 400, "Notes");
+                w.set_content("Welcome to Notes!\n\nType your notes here.\nPress Enter for new lines.\nBackspace to delete.\n\nThis is a simple text editor.");
+                w
+            }
+            _ => {
+                // Default window
+                let mut w = Window::new(0, x, y, 400, 300, "Application");
+                w.set_content("New Application Window");
+                w
+            }
+        };
+        
+        self.add_window(win);
+        self.dock.set_active(icon_idx, true);
+        
+        crate::serial_println!("[desktop] Dock icon {} clicked - created window", icon_idx);
     }
 }
 

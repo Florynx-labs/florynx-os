@@ -16,7 +16,7 @@ lazy_static! {
         Keyboard::new(
             ScancodeSet1::new(),
             layouts::Us104Key,
-            HandleControl::Ignore,
+            HandleControl::MapLettersToUnicode,
         )
     );
 }

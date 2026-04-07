@@ -76,6 +76,21 @@ All changes below are **merged, tested, and pushed** to `main`.
 - **Panel**: Layout containers with padding/spacing, vertical/horizontal modes
 - **Text Editor**: Multi-line editing, line numbers, toolbar with buttons
 
+## v0.2.5 Critical Bug Fixes & Dock Functionality
+
+| # | Change | Files Modified | Commit |
+|---|--------|---------------|--------|
+| 37 | **Fix window drag reload bug**: don't trigger full redraw when bringing window to front | `gui/desktop.rs` | v0.2.5 |
+| 38 | **Fix keyboard backspace**: changed HandleControl to MapLettersToUnicode for proper control char handling | `drivers/input/keyboard.rs` | v0.2.5 |
+| 39 | **Make dock icons clickable**: return clicked icon index, create windows on click | `gui/dock.rs`, `gui/desktop.rs` | v0.2.5 |
+| 40 | **Dock window creation**: clicking dock icons creates Files, Terminal, Settings, Monitor, Notes windows | `gui/desktop.rs` | v0.2.5 |
+
+**Bug Fixes**:
+- ✅ Window drag no longer causes full screen reload (smooth dragging)
+- ✅ Backspace and control characters now work properly
+- ✅ Dock icons are now fully functional and create windows
+- ✅ Each dock icon creates a specific application window
+
 ---
 
 # 2. Prioritized Task Backlog

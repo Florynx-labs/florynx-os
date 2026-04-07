@@ -98,10 +98,9 @@ impl Dock {
         }
     }
 
-    pub fn handle_event(&mut self, event: &Event, screen_w: usize, screen_h: usize) -> bool {
+    pub fn handle_event(&mut self, event: &Event, screen_w: usize, screen_h: usize) -> Option<usize> {
         match *event {
             Event::MouseMove { x, y } => {
-                let old = self.hovered;
                 self.hovered = None;
                 for i in 0..self.count {
                     if self.icon_rect(i, screen_w, screen_h).contains(x, y) {
@@ -109,13 +108,18 @@ impl Dock {
                         break;
                     }
                 }
-                self.hovered != old // consumed if changed
+                None // Don't return clicked index for hover
             }
             Event::MouseDown { x, y, button: MouseButton::Left } => {
-                let dr = self.dock_rect(screen_w, screen_h);
-                dr.contains(x, y) // consume clicks on dock
+                // Check which icon was clicked
+                for i in 0..self.count {
+                    if self.icon_rect(i, screen_w, screen_h).contains(x, y) {
+                        return Some(i); // Return clicked icon index
+                    }
+                }
+                None
             }
-            _ => false,
+            _ => None,
         }
     }
 
