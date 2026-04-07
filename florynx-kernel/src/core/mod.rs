@@ -8,3 +8,4 @@
 pub mod kernel;
 pub mod panic;
 pub mod logging;
+pub mod exception;
