@@ -33,9 +33,10 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     // =========================================================================
     florynx_kernel::init(boot_info);
 
-    serial_println!("=========================================");
-    serial_println!("  Florynx Kernel v0.2 — Booting...");
-    serial_println!("=========================================");
+    serial_println!("╔═══════════════════════════════════════════════════════════════╗");
+    serial_println!("║           Florynx Kernel v0.3.0 'Sentinel'                   ║");
+    serial_println!("║     Production-Level Exception Handling • GUI • VFS          ║");
+    serial_println!("╚═══════════════════════════════════════════════════════════════╝");
 
     // =========================================================================
     // Phase 2: Memory initialization (still no interrupts)
@@ -60,6 +61,10 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     florynx_kernel::memory::heap::init_heap(&mut mapper, &mut frame_allocator)
         .expect("heap initialization failed");
     serial_println!("[boot] heap initialized");
+
+    // Initialize VFS and ramdisk
+    florynx_kernel::fs::ramdisk::init();
+    florynx_kernel::fs::vfs::init();
 
     // =========================================================================
     // Phase 3: GUI initialization (heap is ready, interrupts still disabled)

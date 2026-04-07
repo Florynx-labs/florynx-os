@@ -39,11 +39,11 @@
 
 ### 🚧 Next Steps — Path to Production
 
-**Phase 2: File System** (Next)
-- ❌ VFS (Virtual File System) abstraction
-- ❌ Ramdisk filesystem driver
-- ❌ File operations (open, read, write, close)
-- ❌ Directory operations (list, create, delete)
+**Phase 2: File System** ✅ COMPLETED
+- ✅ VFS (Virtual File System) abstraction
+- ✅ Ramdisk filesystem driver (4 MiB capacity)
+- ✅ File operations (open, read, write, close, seek)
+- ✅ Directory operations (create_file, create_dir, list_dir, stat)
 
 **Phase 3: Process Management**
 - ❌ Task scheduler (round-robin or priority-based)
@@ -175,6 +175,51 @@ All changes below are **merged, tested, and pushed** to `main`.
 - ✅ General Protection Fault (Vector 13)
 - ✅ Page Fault (Vector 14)
 - ✅ Alignment Check (Vector 17)
+
+## v0.3.0 Core Kernel Features — Phase 2: File System
+
+| # | Change | Files Modified | Commit |
+|---|--------|---------------|--------|
+| 47 | **VFS abstraction**: Complete virtual filesystem with file descriptors, path resolution | `fs/vfs.rs` | v0.3.0 |
+| 48 | **Ramdisk driver**: In-memory filesystem with 4 MiB capacity (1024 blocks × 4 KiB) | `fs/ramdisk.rs` (new) | v0.3.0 |
+| 49 | **File operations**: open, read, write, close, seek with permission checking | `fs/vfs.rs` | v0.3.0 |
+| 50 | **Directory operations**: create_file, create_dir, list_dir, stat | `fs/vfs.rs` | v0.3.0 |
+| 51 | **Default directories**: /bin, /etc, /home, /tmp, /dev created at boot | `fs/vfs.rs` | v0.3.0 |
+| 52 | **File descriptor table**: FD allocation, tracking, stdin/stdout/stderr reserved (0,1,2) | `fs/vfs.rs` | v0.3.0 |
+
+**File System Features**:
+- **VFS Layer**: Abstract filesystem interface, path resolution, inode management
+- **Ramdisk Backend**: 4 MiB in-memory storage, 4 KiB blocks, BTreeMap-based
+- **File Operations**: Full POSIX-like API (open, read, write, close, seek)
+- **Directory Operations**: mkdir, readdir, stat
+- **Permissions**: Read/write/execute permission checking
+- **File Types**: Regular files, directories, symlinks, devices, pipes
+- **Error Handling**: Comprehensive error types (NotFound, PermissionDenied, etc.)
+
+**VFS API**:
+```rust
+// Create file
+vfs.create_file("/home/test.txt")?;
+
+// Open file
+let fd = vfs.open("/home/test.txt", OpenFlags::read_write())?;
+
+// Write data
+vfs.write(fd, b"Hello, Florynx!")?;
+
+// Seek to beginning
+vfs.seek(fd, 0)?;
+
+// Read data
+let mut buffer = [0u8; 100];
+let bytes_read = vfs.read(fd, &mut buffer)?;
+
+// Close file
+vfs.close(fd)?;
+
+// List directory
+let entries = vfs.list_dir("/home")?;
+```
 
 ---
 

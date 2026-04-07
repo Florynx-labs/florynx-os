@@ -28,7 +28,7 @@ checksum = "13f6a8a495d2f93fe3d6eb3a224f9aa749a63cfd746ed03eb5ddcbd00ade7d8f"
 
 [[package]]
 name = "florynx-kernel"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "bootloader",
  "lazy_static",
