@@ -1,5 +1,5 @@
 <p align="center"><strong>Florynx-OS System Architecture</strong></p>
-<p align="center"><em>v0.3 — WASM-Integrated Scalable Blueprint</em></p>
+<p align="center"><em>v0.3 'Sentinel' — Double-Buffered Compositor + Security Foundation</em></p>
 
 ---
 
@@ -80,7 +80,7 @@ graph TB
             direction LR
             PMM["memory::frame_alloc\nO(1) bump alloc"]
             VMM["memory::paging\n4-level PT"]
-            HEAP["memory::heap\n4 MiB linked-list"]
+            HEAP["memory::heap\n16 MiB linked-list"]
             MMAP["memory::mmap\nUser mapping"]
         end
 
@@ -107,13 +107,13 @@ graph TB
             UART["serial::uart"]
             PIT["timer::pit"]
             BGA["display::bga"]
-            FBUF["display::framebuffer"]
+            FBUF["display::framebuffer\nRAM back buffer → VRAM flush"]
         end
 
         subgraph GUI["GUI Compositor"]
             direction LR
             EVBUS["gui::event_bus\nAsync dispatch"]
-            DESKTOP["gui::desktop\nCompositor\ndirty-rect engine"]
+            DESKTOP["gui::desktop\nDouble-buffered compositor\ndirty-rect engine (32 rects)"]
             WINMGR["gui::window\nWindow manager"]
             DOCK["gui::dock\nFloating dock"]
             RENDER["gui::renderer\nDraw primitives"]
@@ -188,9 +188,9 @@ graph TB
     classDef barrier fill:#2B1A1A,stroke:#F26D6D,color:#F3F7FA,stroke-width:2px
     classDef hw fill:#0D1117,stroke:#555,color:#888
 
-    class GDT,IDT,ASM,PIC,PMM,VMM,HEAP,PS2K,PS2M,UART,PIT,BGA,FBUF,RENDER,DESKTOP,WINMGR,DOCK,CAPS working
+    class GDT,IDT,ASM,PIC,PMM,VMM,HEAP,PS2K,PS2M,UART,PIT,BGA,FBUF,RENDER,DESKTOP,WINMGR,DOCK,CAPS,AUDIT,DEVFS,VFS,TMPFS,SC,CAP working
     class WENGINE,WLOADER,WSYSCALL,WLINMEM,WCAP,WASMFS,LIBWASI,WA1,WA2,WA3,WA4,WA5 wasm
-    class SCORE,SPREEMPT,SBALANCE,MMAP,CHAN,MSGBUS,SHMEM,VFS,TMPFS,DEVFS,DRVMGR,EVBUS,WIDGETS,SANDBOX,AUDIT,SC,CAP,LIBFX,NA1,NA2 planned
+    class SCORE,SPREEMPT,SBALANCE,MMAP,CHAN,MSGBUS,SHMEM,DRVMGR,EVBUS,WIDGETS,SANDBOX,LIBFX,NA1,NA2 planned
     class CPU,RAM,GPU,PS2,COM,DISK hw
 ```
 
@@ -198,7 +198,7 @@ graph TB
 
 | Border | Meaning |
 |--------|---------|
-| **Solid green** | Currently working in v0.2 |
+| **Solid green** | Currently working in v0.3 |
 | **Solid purple** | New WASM subsystem (v0.3 target) |
 | **Dashed green** | Planned / stub exists |
 | **Red** | Security barrier |
@@ -260,7 +260,7 @@ graph TB
 |                                                                         |
 |  +===================================================================+  |
 |  |                    MEMORY SUBSYSTEM (unchanged)                   |  |
-|  |  Frame Alloc (O(1)) | Paging (4-level) | Heap (4 MiB)           |  |
+|  |  Frame Alloc (O(1)) | Paging (4-level) | Heap (16 MiB)          |  |
 |  +===================================================================+  |
 |                                                                         |
 |  +===================================================================+  |
@@ -269,8 +269,8 @@ graph TB
 |  +===================================================================+  |
 |                                                                         |
 |  +===================================================================+  |
-|  |                    GUI COMPOSITOR (unchanged + event bus)         |  |
-|  |  Desktop (dirty-rect) | Windows | Dock | Renderer | Theme       |  |
+|  |                    GUI COMPOSITOR (double-buffered + dirty-rect)  |  |
+|  |  Desktop (32-rect engine) | Windows | Dock | Renderer | Theme   |  |
 |  +===================================================================+  |
 +==========================================================================+
 |                         HARDWARE                                         |
@@ -569,7 +569,7 @@ All phases remain exactly as they are. WASM runtime initializes in a new Phase 5
 
 ```
 Phase 1: GDT → IDT → PIC + PIT                    [arch, interrupts]
-Phase 2: Paging → Frame Alloc → Heap (4 MiB)       [memory]
+Phase 2: Paging → Frame Alloc → Heap (16 MiB)      [memory]
 Phase 3: BGA Framebuffer → Console → Mouse          [drivers, gui]
 Phase 4: Enable Interrupts                           [arch]
 Phase 5a: post_init() → launch_desktop()             [gui]
@@ -584,7 +584,7 @@ Phase 6: hlt_loop with redraw_if_needed()            [main]
 | Region | Address | Size | Status |
 |--------|---------|------|--------|
 | Kernel Code | Bootloader-defined | ~256 KiB | Working |
-| Kernel Heap | `0x4444_4444_0000` | 4 MiB | Working |
+| Kernel Heap | `0x4444_4444_0000` | 16 MiB | Working |
 | BGA Framebuffer | `0xFD000000` (phys) | 3 MiB | Working |
 | WASM Linear Memory Pool | `0x5555_0000_0000` | 64 MiB (configurable) | Planned |
 | User Process Space | `0x0000_4000_0000` | 2 GiB | Planned |
@@ -606,16 +606,16 @@ Phase 6: hlt_loop with redraw_if_needed()            [main]
 | `input::mouse` | `src/drivers/input/mouse.rs` | PS/2 3-byte, timeout-safe |
 | `serial::uart` | `src/drivers/serial/uart.rs` | UART 16550, COM1 |
 | `display::bga` | `src/drivers/display/bga.rs` | Bochs VBE 1024x768 |
-| `display::framebuffer` | `src/drivers/display/framebuffer.rs` | Pixel ops, RGB/BGR |
+| `display::framebuffer` | `src/drivers/display/framebuffer.rs` | Double-buffered: RAM back buffer → VRAM flush_rect/flush_full |
 | `memory::paging` | `src/memory/paging.rs` | 4-level page table |
 | `memory::frame_allocator` | `src/memory/frame_allocator.rs` | O(1) bump allocator |
-| `memory::heap` | `src/memory/heap.rs` | 4 MiB linked-list |
-| `process::scheduler` | `src/process/scheduler.rs` | Round-robin cooperative |
+| `memory::heap` | `src/memory/heap.rs` | 16 MiB linked-list |
+| `process::scheduler` | `src/process/scheduler.rs` | Round-robin, timer-based, task exit() |
 | `process::task` | `src/process/task.rs` | Task struct, user-mode jump |
 | `process::context` | `src/process/context.rs` | CpuContext (all GPRs) |
 | `gui::renderer` | `src/gui/renderer.rs` | Primitives, font, cursor |
 | `gui::theme` | `src/gui/theme.rs` | Bioluminescent palette |
-| `gui::desktop` | `src/gui/desktop.rs` | Compositor, dirty-rect engine |
+| `gui::desktop` | `src/gui/desktop.rs` | Double-buffered compositor, 32-rect dirty engine with merge |
 | `gui::window` | `src/gui/window.rs` | Draggable, shadow, buttons |
 | `gui::dock` | `src/gui/dock.rs` | Floating dock, icons |
 | `gui::console` | `src/gui/console.rs` | Early-boot framebuffer text |
@@ -676,7 +676,7 @@ florynx-kernel/src/
 │   ├── inode.rs                🟡 → implement inodes
 │   ├── mount.rs                🟡 → implement mount table
 │   ├── tmpfs.rs                🔲 in-memory FS
-│   ├── devfs.rs                🔲 device nodes
+│   ├── devfs.rs                ✅ /dev/null, /dev/zero, /dev/serial0
 │   └── wasmfs.rs               🔲 WASM module store
 │
 ├── syscall/
@@ -685,7 +685,7 @@ florynx-kernel/src/
 │   └── abi.rs                  🔲 ABI constants
 │
 ├── drivers/
-│   ├── display/                ✅ unchanged
+│   ├── display/                ✅ double-buffered framebuffer
 │   ├── input/                  ✅ unchanged
 │   ├── serial/                 ✅ unchanged
 │   ├── timer/                  ✅ unchanged
@@ -693,21 +693,22 @@ florynx-kernel/src/
 │   └── pci/                    🔲 PCI enumeration
 │
 ├── gui/
-│   ├── renderer.rs             ✅ unchanged
-│   ├── theme.rs                ✅ unchanged
-│   ├── desktop.rs              ✅ unchanged
-│   ├── window.rs               ✅ unchanged
-│   ├── dock.rs                 ✅ unchanged
-│   ├── console.rs              ✅ unchanged
-│   ├── event.rs                ✅ unchanged
-│   ├── icons.rs                ✅ unchanged
+│   ├── renderer.rs             ✅ draw primitives + cursor (double-buffered)
+│   ├── theme.rs                ✅ bioluminescent palette
+│   ├── desktop.rs              ✅ compositor + 32-rect dirty engine + merge
+│   ├── window.rs               ✅ draggable windows, shadow, traffic-lights
+│   ├── dock.rs                 ✅ floating dock, granular hover dirty
+│   ├── console.rs              ✅ early-boot framebuffer text
+│   ├── event.rs                ✅ Rect (intersects/union/clamp), events
+│   ├── icons.rs                ✅ 16x16 + 8x8 bitmaps
 │   ├── event_bus.rs            🔲 async event dispatch
 │   └── widgets/                🔲 Button, Label, TextInput
 │
 ├── security/
-│   ├── capability.rs           🟡 → implement cap tokens
+│   ├── mod.rs                  ✅ module root
+│   ├── capability.rs           ✅ 18 bitflag caps, CapabilitySet, presets
 │   ├── isolation.rs            🟡 → implement sandboxing
-│   └── audit.rs                🔲 security event log
+│   └── audit.rs                ✅ 256-entry ring buffer audit log
 │
 ├── runtime/
 │   ├── elf_loader.rs           🟡 → implement ELF64 parser
@@ -721,5 +722,6 @@ Legend: ✅ = Working | 🟡 = Stub → implement | 🔲 = New file | 🆕 = New
 
 ---
 
-*Florynx-OS v0.3 Architecture — April 2026*
+*Florynx-OS v0.3 'Sentinel' Architecture — April 2026*
+*Double-buffered compositor, capability security, dirty-rect engine.*
 *WASM integration inspired by Wasmtime, Redox OS, and Fuchsia Zircon.*
