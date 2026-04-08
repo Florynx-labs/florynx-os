@@ -51,6 +51,7 @@ impl WindowManager {
         if let Some(ai) = self.active {
             if let Some(ref mut w) = self.windows[ai] {
                 w.active = false;
+                w.mark_dirty();
             }
         }
 
@@ -105,10 +106,12 @@ impl WindowManager {
         if let Some(ai) = self.active {
             if let Some(ref mut w) = self.windows[ai] {
                 w.active = false;
+                w.mark_dirty();
             }
         }
         if let Some(ref mut w) = self.windows[slot] {
             w.active = true;
+            w.mark_dirty();
         }
         self.active = Some(slot);
         changed

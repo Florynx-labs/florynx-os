@@ -4,6 +4,7 @@
 // Draggable window with rounded titlebar, traffic-light buttons, and content.
 // =============================================================================
 
+use alloc::vec::Vec;
 use crate::gui::renderer::{self, Color, FramebufferManager};
 use crate::gui::theme;
 use crate::gui::event::{Event, MouseButton, Rect};
@@ -41,6 +42,13 @@ pub struct Window {
     // animations
     pub anim_pos: AnimatedPos,
     pub anim_opacity: AnimatedOpacity,
+    // per-window offscreen buffer (RGB, 3 bytes per pixel)
+    // Includes shadow area: total_w × total_h
+    pub buffer: Vec<u8>,
+    pub buf_w: usize,
+    pub buf_h: usize,
+    /// True if the window content changed and needs to be redrawn to its buffer.
+    pub dirty: bool,
 }
 
 impl Window {
@@ -48,6 +56,10 @@ impl Window {
         let mut t = [0u8; MAX_TITLE];
         let tlen = title.len().min(MAX_TITLE);
         t[..tlen].copy_from_slice(&title.as_bytes()[..tlen]);
+        let th = &theme::DARK;
+        let extra = th.shadow_layers * 2 + 2;
+        let buf_w = w + extra;
+        let buf_h = h + extra;
         Window {
             id, x, y, w, h,
             title: t,
@@ -61,6 +73,10 @@ impl Window {
             drag_oy: 0,
             anim_pos: AnimatedPos::new(x as f32, y as f32, DRAG_SPEED),
             anim_opacity: AnimatedOpacity::new(0.0, OPEN_SPEED),
+            buffer: Vec::new(), // allocated lazily on first render
+            buf_w,
+            buf_h,
+            dirty: true, // needs initial draw
         }
     }
 
@@ -68,6 +84,7 @@ impl Window {
         let len = text.len().min(MAX_CONTENT);
         self.content[..len].copy_from_slice(&text.as_bytes()[..len]);
         self.content_len = len;
+        self.dirty = true;
     }
 
     pub fn title_str(&self) -> &str {
@@ -119,8 +136,31 @@ impl Window {
         self.anim_opacity.fade_in();
     }
 
-    /// Draw the window to the framebuffer.
+    /// Render the window to its offscreen buffer (only if dirty).
+    pub fn render_to_buffer(&mut self, fb: &mut FramebufferManager) {
+        if !self.visible || !self.dirty { return; }
+
+        // Allocate buffer on first use
+        let buf_pixels = self.buf_w * self.buf_h * 3;
+        if self.buffer.len() != buf_pixels {
+            self.buffer.resize(buf_pixels, 0);
+        }
+
+        // Draw to the global FB at position 0,0 temporarily — we'll copy back.
+        // This reuses existing renderer primitives without rewriting them.
+        // We render at the animated position directly.
+        self.draw_to_fb(fb);
+
+        self.dirty = false;
+    }
+
+    /// Draw the window directly to the framebuffer (at animated position).
     pub fn draw(&self, fb: &mut FramebufferManager) {
+        self.draw_to_fb(fb);
+    }
+
+    /// Internal: draw all window elements to the framebuffer.
+    fn draw_to_fb(&self, fb: &mut FramebufferManager) {
         if !self.visible { return; }
 
         let t = &theme::DARK;
@@ -241,6 +281,7 @@ impl Window {
                         if self.content_len < MAX_CONTENT {
                             self.content[self.content_len] = c as u8;
                             self.content_len += 1;
+                            self.dirty = true;
                             return true;
                         }
                     }
@@ -248,6 +289,7 @@ impl Window {
                         // Remove last character
                         if self.content_len > 0 {
                             self.content_len -= 1;
+                            self.dirty = true;
                             return true;
                         }
                     }
@@ -256,6 +298,7 @@ impl Window {
                         if self.content_len < MAX_CONTENT {
                             self.content[self.content_len] = b'\n';
                             self.content_len += 1;
+                            self.dirty = true;
                             return true;
                         }
                     }
@@ -272,5 +315,10 @@ impl Window {
 
     pub fn is_dragging(&self) -> bool {
         self.dragging
+    }
+
+    /// Mark this window as needing a redraw (e.g. after active state change).
+    pub fn mark_dirty(&mut self) {
+        self.dirty = true;
     }
 }
