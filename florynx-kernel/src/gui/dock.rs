@@ -8,10 +8,14 @@ use crate::gui::renderer::{self, Color, FramebufferManager};
 use crate::gui::theme;
 use crate::gui::event::{Event, MouseButton, Rect};
 use crate::gui::icons::{self, Icon};
+use crate::gui::animation::AnimatedScale;
 
 const MAX_ITEMS: usize = 10;
 const ICON_SIZE: usize = 36;
 const ICON_GAP: usize = 10;
+const HOVER_SCALE: f32 = 1.25;
+const NORMAL_SCALE: f32 = 1.0;
+const SCALE_SPEED: f32 = 0.18;
 
 #[derive(Clone, Copy)]
 pub struct DockItem {
@@ -24,6 +28,7 @@ pub struct Dock {
     items: [Option<DockItem>; MAX_ITEMS],
     count: usize,
     pub hovered: Option<usize>,
+    scales: [AnimatedScale; MAX_ITEMS],
 }
 
 impl Dock {
@@ -32,6 +37,7 @@ impl Dock {
             items: [None; MAX_ITEMS],
             count: 0,
             hovered: None,
+            scales: [AnimatedScale::new(NORMAL_SCALE, SCALE_SPEED); MAX_ITEMS],
         }
     }
 
@@ -66,13 +72,20 @@ impl Dock {
         renderer::draw_rounded_rect(fb, dr.x, dr.y, dr.w, dr.h, 14, t.dock_bg);
         renderer::draw_rounded_border(fb, dr.x, dr.y, dr.w, dr.h, 14, t.border);
 
-        // Icons
+        // Icons with scale animation
         for i in 0..self.count {
             if let Some(item) = &self.items[i] {
                 let ir = self.icon_rect(i, screen_w, screen_h);
                 let icon_r = 8;
+
+                // Apply animated scale
+                let scale = self.scales[i].scale.current;
+                let scaled_size = (ICON_SIZE as f32 * scale) as usize;
+                let offset = (scaled_size.saturating_sub(ICON_SIZE)) / 2;
+                let sx = ir.x.saturating_sub(offset);
+                let sy = ir.y.saturating_sub(offset);
+
                 let color = if Some(i) == self.hovered {
-                    // Brighten on hover
                     Color::rgb(
                         item.color.r.saturating_add(30),
                         item.color.g.saturating_add(30),
@@ -81,17 +94,17 @@ impl Dock {
                 } else {
                     item.color
                 };
-                renderer::draw_rounded_rect(fb, ir.x, ir.y, ir.w, ir.h, icon_r, color);
+                renderer::draw_rounded_rect(fb, sx, sy, scaled_size, scaled_size, icon_r, color);
 
-                // Draw icon centered
-                let icon_x = ir.x + (ICON_SIZE.saturating_sub(item.icon.width)) / 2;
-                let icon_y = ir.y + (ICON_SIZE.saturating_sub(item.icon.height)) / 2;
+                // Draw icon centered in scaled rect
+                let icon_x = sx + (scaled_size.saturating_sub(item.icon.width)) / 2;
+                let icon_y = sy + (scaled_size.saturating_sub(item.icon.height)) / 2;
                 icons::draw_icon(fb, item.icon, icon_x, icon_y, Color::WHITE);
 
                 // Active indicator dot below icon
                 if item.active {
-                    let dot_x = ir.x + ICON_SIZE / 2;
-                    let dot_y = ir.y + ICON_SIZE + 4;
+                    let dot_x = sx + scaled_size / 2;
+                    let dot_y = sy + scaled_size + 4;
                     renderer::draw_circle(fb, dot_x, dot_y, 2, t.accent);
                 }
             }
@@ -129,5 +142,23 @@ impl Dock {
                 item.active = active;
             }
         }
+    }
+
+    /// Tick dock scale animations. Returns true if any scale changed (needs redraw).
+    pub fn tick_animations(&mut self) -> bool {
+        // Set targets based on current hover state
+        for i in 0..self.count {
+            let target = if Some(i) == self.hovered { HOVER_SCALE } else { NORMAL_SCALE };
+            self.scales[i].set_target(target);
+        }
+
+        // Tick all
+        let mut changed = false;
+        for i in 0..self.count {
+            if self.scales[i].tick() {
+                changed = true;
+            }
+        }
+        changed
     }
 }

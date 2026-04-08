@@ -484,7 +484,7 @@ impl Desktop {
     /// Tick all animations (called once per frame). Marks dirty rects for any
     /// window whose animated position/opacity changed.
     pub fn tick_animations(&mut self) {
-        // Collect dirty rects from animations first (avoids borrow conflict)
+        // --- Window animations ---
         let mut anim_dirty: [(Rect, Rect, bool); MAX_WINDOWS] =
             [(Rect::new(0,0,0,0), Rect::new(0,0,0,0), false); MAX_WINDOWS];
 
@@ -504,6 +504,12 @@ impl Desktop {
                 self.mark_dirty(old_b);
                 self.mark_dirty(new_b);
             }
+        }
+
+        // --- Dock scale animations ---
+        if self.dock.tick_animations() {
+            let dock_y = self.screen_h.saturating_sub(theme::DARK.dock_h + theme::DARK.dock_margin + 10);
+            self.mark_dirty(Rect::new(0, dock_y, self.screen_w, self.screen_h - dock_y));
         }
     }
 
