@@ -489,6 +489,7 @@ fn draw_cursor_shape(fb: &mut FramebufferManager, x: usize, y: usize) {
 }
 
 /// Update cursor position — called from mouse IRQ handler.
+/// Writes to back buffer then flushes old + new cursor regions to VRAM.
 pub fn update_cursor(x: usize, y: usize) {
     let mut fb_guard = match FRAMEBUFFER.try_lock() {
         Some(guard) => guard,
@@ -503,9 +504,19 @@ pub fn update_cursor(x: usize, y: usize) {
         None => return,
     };
 
+    // Restore old pixels in back buffer and flush old region
+    let old_x = backup.x;
+    let old_y = backup.y;
+    let was_valid = backup.valid;
     restore_under_cursor(fb, &backup);
+    if was_valid {
+        fb.flush_rect(old_x, old_y, CURSOR_W + 2, CURSOR_H + 2);
+    }
+
+    // Save new pixels, draw cursor in back buffer, flush new region
     save_under_cursor(fb, &mut backup, x, y);
     draw_cursor_shape(fb, x, y);
+    fb.flush_rect(x, y, CURSOR_W + 2, CURSOR_H + 2);
 }
 
 /// Redraw cursor on an already-locked framebuffer (e.g. after a full desktop redraw).

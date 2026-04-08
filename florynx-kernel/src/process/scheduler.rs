@@ -199,17 +199,7 @@ pub fn timer_tick() {
             sched.current_time_slice -= 1;
         }
         if sched.current_time_slice == 0 {
-            if let Some((prev_idx, next_idx)) = sched.schedule_next() {
-                if let (Some(ref prev), Some(ref next)) =
-                    (sched.tasks[prev_idx].as_ref(), sched.tasks[next_idx].as_ref())
-                {
-                    crate::serial_println!(
-                        "[scheduler] switch: '{}' -> '{}'",
-                        prev.name,
-                        next.name
-                    );
-                }
-            }
+            sched.schedule_next();
         }
     }
 }

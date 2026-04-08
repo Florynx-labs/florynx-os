@@ -181,7 +181,7 @@ impl WindowManager {
 // Desktop
 // ---------------------------------------------------------------------------
 
-const MAX_DIRTY: usize = 8;
+const MAX_DIRTY: usize = 32;
 
 pub struct Desktop {
     wm: WindowManager,
@@ -231,8 +231,12 @@ impl Desktop {
 
     /// Add a window to the desktop.
     pub fn add_window(&mut self, win: Window) -> usize {
+        let wb = win.bounds_with_shadow();
         let id = self.wm.add_window(win);
-        self.needs_full_redraw = true;
+        // Only dirty the new window area + dock (for active dot update)
+        self.mark_dirty(wb);
+        let dock_y = self.screen_h.saturating_sub(theme::DARK.dock_h + theme::DARK.dock_margin + 10);
+        self.mark_dirty(Rect::new(0, dock_y, self.screen_w, self.screen_h - dock_y));
         id
     }
 
@@ -263,12 +267,12 @@ impl Desktop {
         }
     }
 
-    /// Full draw: background + all windows + dock. Used for first render or major changes.
+    /// Full draw: background + all windows + dock → flush entire back buffer to VRAM.
     pub fn draw_full(&mut self, fb: &mut FramebufferManager) {
         let t = &theme::DARK;
 
         if !self.bg_cached {
-            // First time: render the expensive gradient + vignette
+            // First time: render the expensive gradient + vignette to back buffer
             renderer::draw_gradient_with_noise(fb, 0, 0, self.screen_w, self.screen_h,
                 t.desktop_top, t.desktop_bot, 8);
             renderer::draw_vignette(fb, 40);
@@ -287,7 +291,7 @@ impl Desktop {
             }
             self.bg_cached = true;
         } else {
-            // Blit full cached background
+            // Blit full cached background to back buffer
             let full = Rect::new(0, 0, self.screen_w, self.screen_h);
             self.blit_bg_rect(fb, &full);
         }
@@ -295,15 +299,21 @@ impl Desktop {
         self.wm.draw(fb);
         self.dock.draw(fb, self.screen_w, self.screen_h);
 
+        // Flush entire back buffer to VRAM in one shot
+        fb.flush_full();
+
         self.needs_full_redraw = false;
         self.dirty_count = 0;
     }
 
-    /// Partial draw: only repaint dirty rectangles. Much faster than full redraw.
+    /// Partial draw: only repaint dirty rectangles, then flush them to VRAM.
     fn draw_partial(&mut self, fb: &mut FramebufferManager) {
         if self.dirty_count == 0 { return; }
 
-        // 1. Blit background cache over each dirty rect (erase old content)
+        // Merge overlapping dirty rects to reduce flush calls
+        self.merge_dirty_rects();
+
+        // 1. Blit background cache over each dirty rect (erase old content in back buffer)
         for i in 0..self.dirty_count {
             self.blit_bg_rect(fb, &self.dirty[i]);
         }
@@ -336,7 +346,40 @@ impl Desktop {
             }
         }
 
+        // 4. Flush ONLY dirty regions from back buffer → VRAM
+        for i in 0..self.dirty_count {
+            let r = self.dirty[i];
+            fb.flush_rect(r.x, r.y, r.w, r.h);
+        }
+
         self.dirty_count = 0;
+    }
+
+    /// Merge overlapping dirty rects to minimize flush calls.
+    fn merge_dirty_rects(&mut self) {
+        if self.dirty_count <= 1 { return; }
+
+        let mut merged = true;
+        while merged {
+            merged = false;
+            let mut i = 0;
+            while i < self.dirty_count {
+                let mut j = i + 1;
+                while j < self.dirty_count {
+                    if self.dirty[i].intersects(&self.dirty[j]) {
+                        // Merge j into i
+                        self.dirty[i] = self.dirty[i].union(&self.dirty[j]);
+                        // Remove j by swapping with last
+                        self.dirty_count -= 1;
+                        self.dirty[j] = self.dirty[self.dirty_count];
+                        merged = true;
+                    } else {
+                        j += 1;
+                    }
+                }
+                i += 1;
+            }
+        }
     }
 
     /// Process keyboard input from the PS/2 keyboard driver.
@@ -348,9 +391,15 @@ impl Desktop {
             if let Some(ref mut win) = self.wm.windows[active_idx] {
                 let event = Event::KeyPress { key };
                 if win.handle_event(&event, self.screen_w, self.screen_h) {
-                    // Window consumed the key event, mark it dirty for redraw
-                    let bounds = win.bounds_with_shadow();
-                    self.mark_dirty(bounds);
+                    // Only dirty the content area (below titlebar), not the whole window+shadow
+                    let t = &theme::DARK;
+                    let content_rect = Rect::new(
+                        win.x,
+                        win.y + t.titlebar_h,
+                        win.w,
+                        win.h.saturating_sub(t.titlebar_h),
+                    );
+                    self.mark_dirty(content_rect);
                 }
             }
         }
@@ -371,12 +420,26 @@ impl Desktop {
             if let Some(icon_idx) = self.dock.handle_event(&ev, self.screen_w, self.screen_h) {
                 // Dock icon clicked - create window based on icon
                 self.on_dock_click(icon_idx);
-                self.needs_full_redraw = true;
                 return;
             }
             
-            // Then check windows
-            self.wm.handle_event(&ev, self.screen_w, self.screen_h);
+            // Check windows — if a click brings a window to front, dirty all overlapping areas
+            let old_active = self.wm.active;
+            if self.wm.handle_event(&ev, self.screen_w, self.screen_h) {
+                if self.wm.active != old_active {
+                    // Focus changed — dirty both old and new active windows
+                    if let Some(old_idx) = old_active {
+                        if let Some(ref w) = self.wm.windows[old_idx] {
+                            self.mark_dirty(w.bounds_with_shadow());
+                        }
+                    }
+                    if let Some(new_idx) = self.wm.active {
+                        if let Some(ref w) = self.wm.windows[new_idx] {
+                            self.mark_dirty(w.bounds_with_shadow());
+                        }
+                    }
+                }
+            }
         }
 
         if !left_now && left_was {
@@ -405,7 +468,13 @@ impl Desktop {
                 }
             } else {
                 // Update dock hover state
+                let old_hovered = self.dock.hovered;
                 self.dock.handle_event(&ev, self.screen_w, self.screen_h);
+                if self.dock.hovered != old_hovered {
+                    // Dock hover changed — mark dock area dirty
+                    let dock_y = self.screen_h.saturating_sub(theme::DARK.dock_h + theme::DARK.dock_margin + 10);
+                    self.mark_dirty(Rect::new(0, dock_y, self.screen_w, self.screen_h - dock_y));
+                }
             }
         }
     }
@@ -509,8 +578,9 @@ pub fn init() {
 pub fn draw() {
     if let Some(ref mut fb) = *FRAMEBUFFER.lock() {
         if let Some(ref mut desktop) = *DESKTOP.lock() {
-            desktop.draw_full(fb);
+            desktop.draw_full(fb); // draws to back buffer + flush_full
             renderer::redraw_cursor_on(fb, desktop.mouse_x, desktop.mouse_y);
+            fb.flush_rect(desktop.mouse_x, desktop.mouse_y, 16, 20);
         }
     }
 }
@@ -547,9 +617,12 @@ pub fn redraw_if_needed() {
         if desktop.needs_full_redraw {
             desktop.draw_full(fb);
             renderer::redraw_cursor_on(fb, desktop.mouse_x, desktop.mouse_y);
+            // Cursor was drawn after flush_full, flush just the cursor area
+            fb.flush_rect(desktop.mouse_x, desktop.mouse_y, 16, 20);
         } else if desktop.dirty_count > 0 {
             desktop.draw_partial(fb);
             renderer::redraw_cursor_on(fb, desktop.mouse_x, desktop.mouse_y);
+            fb.flush_rect(desktop.mouse_x, desktop.mouse_y, 16, 20);
         }
     }
 }

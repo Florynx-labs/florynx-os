@@ -143,32 +143,32 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
 fn test_task_a() {
     for i in 0..5 {
         florynx_kernel::serial_println!("[task_a] iteration {}", i);
-        // Simulate work
         for _ in 0..100000 {
             core::hint::spin_loop();
         }
     }
     florynx_kernel::serial_println!("[task_a] completed");
+    florynx_kernel::process::scheduler::exit();
 }
 
 fn test_task_b() {
     for i in 0..5 {
         florynx_kernel::serial_println!("[task_b] iteration {}", i);
-        // Simulate work
         for _ in 0..100000 {
             core::hint::spin_loop();
         }
     }
     florynx_kernel::serial_println!("[task_b] completed");
+    florynx_kernel::process::scheduler::exit();
 }
 
 fn test_task_high() {
     for i in 0..3 {
         florynx_kernel::serial_println!("[high_priority_task] iteration {}", i);
-        // Simulate work
         for _ in 0..50000 {
             core::hint::spin_loop();
         }
     }
     florynx_kernel::serial_println!("[high_priority_task] completed");
+    florynx_kernel::process::scheduler::exit();
 }
