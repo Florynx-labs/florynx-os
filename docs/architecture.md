@@ -113,10 +113,11 @@ graph TB
         subgraph GUI["GUI Compositor"]
             direction LR
             EVBUS["gui::event_bus\nAsync dispatch"]
-            DESKTOP["gui::desktop\nDouble-buffered compositor\ndirty-rect engine (32 rects)"]
-            WINMGR["gui::window\nWindow manager"]
-            DOCK["gui::dock\nFloating dock"]
+            DESKTOP["gui::desktop\nAnimated compositor\ndirty-rect engine (32 rects)"]
+            WINMGR["gui::window\nPer-window buffers\ndirty flag"]
+            DOCK["gui::dock\nAnimated scale hover"]
             RENDER["gui::renderer\nDraw primitives"]
+            ANIM["gui::animation\nLERP engine"]
             WIDGETS["gui::widgets\nButton, Label, Input"]
         end
 
@@ -188,7 +189,7 @@ graph TB
     classDef barrier fill:#2B1A1A,stroke:#F26D6D,color:#F3F7FA,stroke-width:2px
     classDef hw fill:#0D1117,stroke:#555,color:#888
 
-    class GDT,IDT,ASM,PIC,PMM,VMM,HEAP,PS2K,PS2M,UART,PIT,BGA,FBUF,RENDER,DESKTOP,WINMGR,DOCK,CAPS,AUDIT,DEVFS,VFS,TMPFS,SC,CAP working
+    class GDT,IDT,ASM,PIC,PMM,VMM,HEAP,PS2K,PS2M,UART,PIT,BGA,FBUF,RENDER,DESKTOP,WINMGR,DOCK,CAPS,AUDIT,DEVFS,VFS,TMPFS,SC,CAP,ANIM working
     class WENGINE,WLOADER,WSYSCALL,WLINMEM,WCAP,WASMFS,LIBWASI,WA1,WA2,WA3,WA4,WA5 wasm
     class SCORE,SPREEMPT,SBALANCE,MMAP,CHAN,MSGBUS,SHMEM,DRVMGR,EVBUS,WIDGETS,SANDBOX,LIBFX,NA1,NA2 planned
     class CPU,RAM,GPU,PS2,COM,DISK hw
@@ -269,8 +270,8 @@ graph TB
 |  +===================================================================+  |
 |                                                                         |
 |  +===================================================================+  |
-|  |                    GUI COMPOSITOR (double-buffered + dirty-rect)  |  |
-|  |  Desktop (32-rect engine) | Windows | Dock | Renderer | Theme   |  |
+|  |                    GUI COMPOSITOR (animated + dirty-rect)         |  |
+|  |  Desktop | Windows (per-buf) | Dock (scale) | Animation | Render |  |
 |  +===================================================================+  |
 +==========================================================================+
 |                         HARDWARE                                         |
@@ -613,11 +614,12 @@ Phase 6: hlt_loop with redraw_if_needed()            [main]
 | `process::scheduler` | `src/process/scheduler.rs` | Round-robin, timer-based, task exit() |
 | `process::task` | `src/process/task.rs` | Task struct, user-mode jump |
 | `process::context` | `src/process/context.rs` | CpuContext (all GPRs) |
+| `gui::animation` | `src/gui/animation.rs` | LERP engine, AnimatedPos/Opacity/Scale |
 | `gui::renderer` | `src/gui/renderer.rs` | Primitives, font, cursor |
 | `gui::theme` | `src/gui/theme.rs` | Bioluminescent palette |
-| `gui::desktop` | `src/gui/desktop.rs` | Double-buffered compositor, 32-rect dirty engine with merge |
-| `gui::window` | `src/gui/window.rs` | Draggable, shadow, buttons |
-| `gui::dock` | `src/gui/dock.rs` | Floating dock, icons |
+| `gui::desktop` | `src/gui/desktop.rs` | Animated compositor, 32-rect dirty engine, per-frame tick |
+| `gui::window` | `src/gui/window.rs` | Per-window buffer, dirty flag, animated pos/opacity |
+| `gui::dock` | `src/gui/dock.rs` | Floating dock, animated hover scale (1.25×) |
 | `gui::console` | `src/gui/console.rs` | Early-boot framebuffer text |
 | `gui::event` | `src/gui/event.rs` | Rect, mouse events |
 | `gui::icons` | `src/gui/icons.rs` | 16x16 + 8x8 bitmaps |
@@ -693,11 +695,12 @@ florynx-kernel/src/
 │   └── pci/                    🔲 PCI enumeration
 │
 ├── gui/
+│   ├── animation.rs            ✅ LERP engine, AnimatedPos/Opacity/Scale
 │   ├── renderer.rs             ✅ draw primitives + cursor (double-buffered)
 │   ├── theme.rs                ✅ bioluminescent palette
-│   ├── desktop.rs              ✅ compositor + 32-rect dirty engine + merge
-│   ├── window.rs               ✅ draggable windows, shadow, traffic-lights
-│   ├── dock.rs                 ✅ floating dock, granular hover dirty
+│   ├── desktop.rs              ✅ animated compositor + 32-rect dirty + merge
+│   ├── window.rs               ✅ per-window buffer, dirty flag, animated pos
+│   ├── dock.rs                 ✅ floating dock, animated hover scale (1.25×)
 │   ├── console.rs              ✅ early-boot framebuffer text
 │   ├── event.rs                ✅ Rect (intersects/union/clamp), events
 │   ├── icons.rs                ✅ 16x16 + 8x8 bitmaps

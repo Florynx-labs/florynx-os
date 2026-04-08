@@ -76,6 +76,17 @@
 - ✅ Heap increased to 16 MiB for display buffers
 - ✅ Scheduler: removed switch spam, tasks call exit()
 
+**Phase 7: Animation + Compositor** ✅ COMPLETED
+- ✅ Animation engine (lerp, ease_out, ease_in_out, SNAP_THRESHOLD)
+- ✅ AnimatedPos, AnimatedOpacity, AnimatedScale types
+- ✅ Window animated position (smooth drag)
+- ✅ Window fade-in on creation
+- ✅ Dock hover magnification (1.25× scale)
+- ✅ Per-window offscreen buffers + dirty flag
+- ✅ Compositor: tick_animations → dirty → merge → redraw → flush
+- ✅ IPC event bus: pub/sub, 32 subscriptions, 64-entry ring buffers
+- ✅ 108 features total across 7 phases
+
 ---
 
 # 1. Completed Modifications (v0.1 → v0.2)
@@ -414,6 +425,37 @@ let stats = scheduler_v2::stats();
 | Key input | Full window+shadow MMIO | Content area flush_rect |
 | Dock hover | Nothing / full redraw | Dock area flush_rect |
 | Cursor move | ~252 MMIO writes | 2× ~14×20 flush_rect |
+
+## v0.3.0 Core Kernel Features — Phase 7: Animation + Compositor
+
+| # | Change | Files Modified | Commit |
+|---|--------|---------------|--------|
+| 95 | **Animation engine**: lerp, ease_out, ease_in_out interpolation | `gui/animation.rs` (new) | v0.3.0 |
+| 96 | **Animation struct**: current/target/speed with per-frame tick() | `gui/animation.rs` | v0.3.0 |
+| 97 | **AnimatedPos**: 2D position animation (window drag smoothing) | `gui/animation.rs` | v0.3.0 |
+| 98 | **AnimatedOpacity**: fade in/out (window open/close) | `gui/animation.rs` | v0.3.0 |
+| 99 | **AnimatedScale**: scale animation (dock hover magnification) | `gui/animation.rs` | v0.3.0 |
+| 100 | **Window animated pos**: draw uses animated draw_x/draw_y | `gui/window.rs` | v0.3.0 |
+| 101 | **Window fade-in**: animate_open() on creation | `gui/window.rs` | v0.3.0 |
+| 102 | **Dock hover scale**: 1.25× magnification with smooth transition | `gui/dock.rs` | v0.3.0 |
+| 103 | **Desktop tick_animations()**: ticks windows + dock each frame | `gui/desktop.rs` | v0.3.0 |
+| 104 | **Per-window buffers**: Vec<u8> offscreen buffer per window | `gui/window.rs` | v0.3.0 |
+| 105 | **Window dirty flag**: only redraw windows whose content changed | `gui/window.rs` | v0.3.0 |
+| 106 | **Focus dirty**: mark old/new active windows dirty on focus change | `gui/desktop.rs` | v0.3.0 |
+| 107 | **IPC event bus**: pub/sub with 64-entry ring buffers (32 subs) | `ipc/event_bus.rs` (new) | v0.3.0 |
+| 108 | **SystemEvent**: type tag + 3 args + timestamp for async dispatch | `ipc/event_bus.rs` | v0.3.0 |
+
+**Compositor Pipeline (per frame)**:
+```
+1. tick_animations() → update window pos/opacity, dock scale
+2. mark_dirty() → dirty rects for animated regions
+3. merge_dirty_rects() → reduce flush count
+4. blit_bg_rect() → erase old content in back buffer
+5. redraw intersecting windows (only dirty ones re-rendered)
+6. draw dock if dirty region overlaps
+7. flush_rect() → copy dirty regions to VRAM
+8. draw cursor last
+```
 
 ---
 
