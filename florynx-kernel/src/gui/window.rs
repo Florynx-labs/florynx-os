@@ -7,6 +7,7 @@
 use crate::gui::renderer::{self, Color, FramebufferManager};
 use crate::gui::theme;
 use crate::gui::event::{Event, MouseButton, Rect};
+use crate::gui::animation::{AnimatedPos, AnimatedOpacity};
 
 const MAX_TITLE: usize = 48;
 const MAX_CONTENT: usize = 256;
@@ -15,6 +16,11 @@ const MAX_CONTENT: usize = 256;
 pub enum WindowId {
     Id(usize),
 }
+
+/// Window drag animation speed (0.0 = frozen, 1.0 = instant).
+const DRAG_SPEED: f32 = 0.35;
+/// Window open fade-in speed.
+const OPEN_SPEED: f32 = 0.12;
 
 pub struct Window {
     pub id: usize,
@@ -32,6 +38,9 @@ pub struct Window {
     dragging: bool,
     drag_ox: usize,
     drag_oy: usize,
+    // animations
+    pub anim_pos: AnimatedPos,
+    pub anim_opacity: AnimatedOpacity,
 }
 
 impl Window {
@@ -50,6 +59,8 @@ impl Window {
             dragging: false,
             drag_ox: 0,
             drag_oy: 0,
+            anim_pos: AnimatedPos::new(x as f32, y as f32, DRAG_SPEED),
+            anim_opacity: AnimatedOpacity::new(0.0, OPEN_SPEED),
         }
     }
 
@@ -82,6 +93,32 @@ impl Window {
         Rect::new(self.x, self.y, self.w, theme::DARK.titlebar_h)
     }
 
+    /// Tick animations. Returns true if any animation changed (needs redraw).
+    pub fn tick_animations(&mut self) -> bool {
+        // Sync animated position with actual x,y
+        self.anim_pos.set_target(self.x as f32, self.y as f32);
+        let pos_changed = self.anim_pos.tick();
+        let opacity_changed = self.anim_opacity.tick();
+        pos_changed || opacity_changed
+    }
+
+    /// Animated x position (use for drawing).
+    pub fn draw_x(&self) -> usize { self.anim_pos.x.as_usize() }
+    /// Animated y position (use for drawing).
+    pub fn draw_y(&self) -> usize { self.anim_pos.y.as_usize() }
+
+    /// Bounds using animated position (for dirty-rect calculation during animation).
+    pub fn animated_bounds_with_shadow(&self) -> Rect {
+        let t = &theme::DARK;
+        let extra = t.shadow_layers * 2 + 2;
+        Rect::new(self.draw_x(), self.draw_y(), self.w + extra, self.h + extra)
+    }
+
+    /// Start the open animation (fade in).
+    pub fn animate_open(&mut self) {
+        self.anim_opacity.fade_in();
+    }
+
     /// Draw the window to the framebuffer.
     pub fn draw(&self, fb: &mut FramebufferManager) {
         if !self.visible { return; }
@@ -89,59 +126,63 @@ impl Window {
         let t = &theme::DARK;
         let r = t.corner_radius;
 
+        // Use animated position for drawing
+        let dx = self.draw_x();
+        let dy = self.draw_y();
+
         // Shadow (offset dark layers behind the window)
         for i in 1..=t.shadow_layers {
             let sc = Color::rgba(0, 0, 0, 40u8.saturating_sub(i as u8 * 10));
             renderer::draw_rounded_rect(fb,
-                self.x + i * 2, self.y + i * 2,
+                dx + i * 2, dy + i * 2,
                 self.w, self.h, r + 2, sc);
         }
 
         // Window body
-        renderer::draw_rounded_rect(fb, self.x, self.y, self.w, self.h, r, t.window_bg);
+        renderer::draw_rounded_rect(fb, dx, dy, self.w, self.h, r, t.window_bg);
 
         // Titlebar
         let tb_color = if self.active { t.titlebar_active } else { t.titlebar };
-        renderer::draw_rounded_rect(fb, self.x, self.y, self.w, t.titlebar_h, r, tb_color);
+        renderer::draw_rounded_rect(fb, dx, dy, self.w, t.titlebar_h, r, tb_color);
         // Fill bottom corners of titlebar (they overlap the body)
-        renderer::draw_rect(fb, self.x, self.y + t.titlebar_h - r, self.w, r, tb_color);
+        renderer::draw_rect(fb, dx, dy + t.titlebar_h - r, self.w, r, tb_color);
 
         // Subtle border
-        renderer::draw_rounded_border(fb, self.x, self.y, self.w, self.h, r, t.border);
+        renderer::draw_rounded_border(fb, dx, dy, self.w, self.h, r, t.border);
 
         // Titlebar separator line
-        renderer::draw_hline(fb, self.x + 1, self.y + t.titlebar_h - 1, self.w - 2,
+        renderer::draw_hline(fb, dx + 1, dy + t.titlebar_h - 1, self.w - 2,
             Color::rgb(50, 50, 58));
 
         // Traffic-light buttons (macOS-style) with icons
-        let btn_y = self.y + (t.titlebar_h - 12) / 2;
+        let btn_y = dy + (t.titlebar_h - 12) / 2;
         let btn_r = 6;
         
         // Close button (red circle + X icon)
-        renderer::draw_circle(fb, self.x + 18, self.y + t.titlebar_h / 2, btn_r, t.close_btn);
+        renderer::draw_circle(fb, dx + 18, dy + t.titlebar_h / 2, btn_r, t.close_btn);
         crate::gui::icons::draw_icon(fb, &crate::gui::icons::ICON_CLOSE, 
-            self.x + 14, btn_y, renderer::Color::rgb(100, 20, 20));
+            dx + 14, btn_y, renderer::Color::rgb(100, 20, 20));
         
         // Minimize button (yellow circle + - icon)
-        renderer::draw_circle(fb, self.x + 38, self.y + t.titlebar_h / 2, btn_r, t.minimize_btn);
+        renderer::draw_circle(fb, dx + 38, dy + t.titlebar_h / 2, btn_r, t.minimize_btn);
         crate::gui::icons::draw_icon(fb, &crate::gui::icons::ICON_MINIMIZE,
-            self.x + 34, btn_y, renderer::Color::rgb(120, 90, 20));
+            dx + 34, btn_y, renderer::Color::rgb(120, 90, 20));
         
         // Maximize button (green circle + square icon)
-        renderer::draw_circle(fb, self.x + 58, self.y + t.titlebar_h / 2, btn_r, t.maximize_btn);
+        renderer::draw_circle(fb, dx + 58, dy + t.titlebar_h / 2, btn_r, t.maximize_btn);
         crate::gui::icons::draw_icon(fb, &crate::gui::icons::ICON_MAXIMIZE,
-            self.x + 54, btn_y, renderer::Color::rgb(20, 80, 20));
+            dx + 54, btn_y, renderer::Color::rgb(20, 80, 20));
 
         // Title text (centered in titlebar)
         let title = self.title_str();
         let text_w = title.len() * 8; // scale=1, 8px per char
-        let text_x = self.x + (self.w.saturating_sub(text_w)) / 2;
-        let text_y = self.y + (t.titlebar_h.saturating_sub(8)) / 2;
+        let text_x = dx + (self.w.saturating_sub(text_w)) / 2;
+        let text_y = dy + (t.titlebar_h.saturating_sub(8)) / 2;
         renderer::draw_text(fb, title, text_x, text_y, t.text, 1);
 
         // Content text
-        let cx = self.x + t.padding;
-        let cy = self.y + t.titlebar_h + t.padding;
+        let cx = dx + t.padding;
+        let cy = dy + t.titlebar_h + t.padding;
         let content = self.content_str();
         // Simple multi-line: split by \n or wrap by width
         let max_chars_per_line = (self.w - 2 * t.padding) / 8;

@@ -230,8 +230,10 @@ impl Desktop {
     }
 
     /// Add a window to the desktop.
-    pub fn add_window(&mut self, win: Window) -> usize {
+    pub fn add_window(&mut self, mut win: Window) -> usize {
         let wb = win.bounds_with_shadow();
+        // Start the open animation (fade in)
+        win.animate_open();
         let id = self.wm.add_window(win);
         // Only dirty the new window area + dock (for active dot update)
         self.mark_dirty(wb);
@@ -479,6 +481,32 @@ impl Desktop {
         }
     }
 
+    /// Tick all animations (called once per frame). Marks dirty rects for any
+    /// window whose animated position/opacity changed.
+    pub fn tick_animations(&mut self) {
+        // Collect dirty rects from animations first (avoids borrow conflict)
+        let mut anim_dirty: [(Rect, Rect, bool); MAX_WINDOWS] =
+            [(Rect::new(0,0,0,0), Rect::new(0,0,0,0), false); MAX_WINDOWS];
+
+        for slot in 0..self.wm.windows.len() {
+            if let Some(ref mut w) = self.wm.windows[slot] {
+                let old_bounds = w.animated_bounds_with_shadow();
+                if w.tick_animations() {
+                    let new_bounds = w.animated_bounds_with_shadow();
+                    anim_dirty[slot] = (old_bounds, new_bounds, true);
+                }
+            }
+        }
+
+        for slot in 0..self.wm.windows.len() {
+            let (old_b, new_b, changed) = anim_dirty[slot];
+            if changed {
+                self.mark_dirty(old_b);
+                self.mark_dirty(new_b);
+            }
+        }
+    }
+
     pub fn needs_redraw(&self) -> bool {
         self.needs_full_redraw || self.dirty_count > 0
     }
@@ -588,7 +616,16 @@ pub fn draw() {
 /// Redraw only what changed. Uses dirty rects for drag, full redraw otherwise.
 /// Called from hlt_loop after each HLT wake.
 pub fn redraw_if_needed() {
-    // Quick check without holding FB lock
+    // Step 1: Tick animations (may generate new dirty rects)
+    {
+        if let Some(ref mut guard) = DESKTOP.try_lock() {
+            if let Some(ref mut desktop) = **guard {
+                desktop.tick_animations();
+            }
+        }
+    }
+
+    // Step 2: Quick check without holding FB lock
     let (needs_full, has_dirty) = {
         match DESKTOP.try_lock() {
             Some(guard) => match guard.as_ref() {
@@ -601,6 +638,7 @@ pub fn redraw_if_needed() {
 
     if !needs_full && !has_dirty { return; }
 
+    // Step 3: Acquire both locks and render
     let mut fb_guard = match FRAMEBUFFER.try_lock() {
         Some(g) => g,
         None => return,
@@ -617,7 +655,6 @@ pub fn redraw_if_needed() {
         if desktop.needs_full_redraw {
             desktop.draw_full(fb);
             renderer::redraw_cursor_on(fb, desktop.mouse_x, desktop.mouse_y);
-            // Cursor was drawn after flush_full, flush just the cursor area
             fb.flush_rect(desktop.mouse_x, desktop.mouse_y, 16, 20);
         } else if desktop.dirty_count > 0 {
             desktop.draw_partial(fb);
