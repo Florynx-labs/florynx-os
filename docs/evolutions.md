@@ -68,6 +68,14 @@
 - ✅ Audit log (256-entry ring buffer, serial output on denials)
 - ✅ devfs: /dev/null, /dev/zero, /dev/serial0
 
+**Phase 6: GUI Performance** ✅ COMPLETED
+- ✅ Double buffering (RAM back buffer → VRAM flush)
+- ✅ Dirty-rect engine (32 rects, merge overlapping)
+- ✅ Granular invalidation (text input, dock hover, window focus)
+- ✅ Cursor: back-buffer draw + flush ~14×20px region
+- ✅ Heap increased to 16 MiB for display buffers
+- ✅ Scheduler: removed switch spam, tasks call exit()
+
 ---
 
 # 1. Completed Modifications (v0.1 → v0.2)
@@ -380,6 +388,32 @@ let stats = scheduler_v2::stats();
 - `/dev/null` — swallows all writes, returns EOF on read
 - `/dev/zero` — returns zeros on read, rejects writes
 - `/dev/serial0` — writes to UART serial port
+
+## v0.3.0 Core Kernel Features — Phase 6: GUI Performance
+
+| # | Change | Files Modified | Commit |
+|---|--------|---------------|--------|
+| 83 | **Double buffering**: RAM back buffer, set_pixel to RAM, flush to VRAM | `drivers/display/framebuffer.rs` | v0.3.0 |
+| 84 | **flush_rect()**: Copy dirty region from back buffer to VRAM via memcpy | `drivers/display/framebuffer.rs` | v0.3.0 |
+| 85 | **flush_full()**: Full buffer blit for initial draw | `drivers/display/framebuffer.rs` | v0.3.0 |
+| 86 | **32-rect dirty engine**: Expanded from 8, merge overlapping rects | `gui/desktop.rs` | v0.3.0 |
+| 87 | **Granular text invalidation**: Only dirty content area on keypress | `gui/desktop.rs` | v0.3.0 |
+| 88 | **Granular dock invalidation**: Only dirty dock rect on hover change | `gui/desktop.rs` | v0.3.0 |
+| 89 | **Window focus invalidation**: Dirty only old+new active windows | `gui/desktop.rs` | v0.3.0 |
+| 90 | **Window creation**: Dirty window+dock area, not full screen | `gui/desktop.rs` | v0.3.0 |
+| 91 | **Cursor double-buffer**: Draw to back buffer, flush ~14×20 region | `gui/renderer.rs` | v0.3.0 |
+| 92 | **Heap 16 MiB**: Expanded for double buffer (~3 MiB) + bg cache (~2.3 MiB) | `memory/heap.rs` | v0.3.0 |
+| 93 | **Scheduler cleanup**: Removed switch logging spam | `process/scheduler.rs` | v0.3.0 |
+| 94 | **Task termination**: Test tasks call exit() on completion | `main.rs` | v0.3.0 |
+
+**Rendering Pipeline (before → after)**:
+| Operation | Before | After |
+|-----------|--------|-------|
+| Full screen redraw | ~786K MMIO writes | 1 memcpy (~3 MiB) |
+| Window drag | 2× full window MMIO | 2× small flush_rect |
+| Key input | Full window+shadow MMIO | Content area flush_rect |
+| Dock hover | Nothing / full redraw | Dock area flush_rect |
+| Cursor move | ~252 MMIO writes | 2× ~14×20 flush_rect |
 
 ---
 
