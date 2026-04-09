@@ -1,5 +1,5 @@
 <p align="center"><strong>Florynx-OS System Architecture</strong></p>
-<p align="center"><em>v0.3 'Sentinel' — Double-Buffered Compositor + Security Foundation</em></p>
+<p align="center"><em>v0.4.5 'Sentinel' — Isolation + ABI + Crash-Safety Foundation</em></p>
 
 ---
 
@@ -199,8 +199,8 @@ graph TB
 
 | Border | Meaning |
 |--------|---------|
-| **Solid green** | Currently working in v0.3 |
-| **Solid purple** | New WASM subsystem (v0.3 target) |
+| **Solid green** | Currently working in v0.4.5 |
+| **Solid purple** | New WASM subsystem (v0.4.5 target) |
 | **Dashed green** | Planned / stub exists |
 | **Red** | Security barrier |
 | **Gray** | Hardware |
@@ -649,7 +649,7 @@ Phase 6: hlt_loop with redraw_if_needed()            [main]
 
 ---
 
-# 9. Target File Structure (v0.3+)
+# 9. Target File Structure (v0.4.5+)
 
 ```
 florynx-kernel/src/
@@ -776,6 +776,6 @@ Legend: ✅ = Working | 🟡 = Stub → implement | 🔲 = New file | 🆕 = New
 
 ---
 
-*Florynx-OS v0.3.0 'Sentinel' Architecture — April 2026*
+*Florynx-OS v0.4.5 'Sentinel' Architecture — April 2026*
 *Kernel/Userland split • KDE Plasma-style shell • Animation engine • 108 features.*
 *WASM integration inspired by Wasmtime, Redox OS, and Fuchsia Zircon.*

@@ -3,12 +3,12 @@
 
 ---
 
-# 🎯 Current Status — v0.3.0
+# 🎯 Current Status — v0.4.5
 
 ## Where We Are
 **Florynx-OS** is now a **production-ready microkernel** with GUI, complete exception handling, and core kernel features approaching **Linux/Windows kernel level**.
 
-### ✅ Completed Features (v0.1 → v0.3.0)
+### ✅ Completed Features (v0.1 → v0.4.5)
 
 **Core Kernel**:
 - ✅ Memory management (paging, heap, frame allocator)
@@ -764,4 +764,4 @@ All tests run in QEMU with `-serial stdio` for serial output verification.
 
 ---
 
-*Last updated: April 2026 — Florynx-OS v0.2.2*
+*Last updated: April 2026 — Florynx-OS v0.4.5*

@@ -1,5 +1,7 @@
 # Florynx-OS v0.3.0 "Sentinel"
 
+> Superseded by `RELEASE_v0.4.5.md`.
+
 **Release Date**: April 8, 2026  
 **Codename**: "Sentinel"  
 **Features**: 108 across 7 phases

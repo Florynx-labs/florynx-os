@@ -4,11 +4,11 @@ version = 4
 
 [[package]]
 name = "florynx-shared"
-version = "0.3.0"
+version = "0.4.5"
 
 [[package]]
 name = "florynx-userland"
-version = "0.3.0"
+version = "0.4.5"
 dependencies = [
  "florynx-shared",
 ]

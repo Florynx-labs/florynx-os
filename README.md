@@ -10,7 +10,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/arch-x86__64-blue" alt="arch" />
   <img src="https://img.shields.io/badge/lang-Rust%20nightly-orange" alt="lang" />
-  <img src="https://img.shields.io/badge/version-0.3.0-cyan" alt="version" />
+  <img src="https://img.shields.io/badge/version-0.4.5-cyan" alt="version" />
   <img src="https://img.shields.io/badge/features-108-brightgreen" alt="features" />
 </p>
 
@@ -20,7 +20,7 @@
 
 FlorynxOS is a modern x86_64 operating system with a **KDE Plasma-inspired desktop shell**, written entirely in Rust (`#![no_std]`). It boots from bare metal into a dark bioluminescent GUI with animated windows, a bottom panel with app menu, and a double-buffered compositor — all rendered on a raw framebuffer.
 
-**v0.3.0 "Sentinel"** introduces kernel/userland separation, an animation engine, per-window compositor buffers, capability-based security, and 3 default wallpapers.
+**v0.4.5 "Sentinel"** introduces kernel/userland separation hardening, animation/compositor maturity, capability-based security, and telemetry-driven diagnostics.
 
 ## Architecture
 
@@ -140,7 +140,7 @@ Phase 5  VFS + DevFS + Scheduler + Syscalls    [services]
 Phase 6  Desktop launch → hlt_loop            [gui]
 ```
 
-### Serial Output (v0.3.0)
+### Serial Output (v0.4.5)
 ```
 [gdt] loaded with kernel segments and TSS
 [idt] loaded with exception and IRQ handlers
@@ -155,7 +155,7 @@ Phase 6  Desktop launch → hlt_loop            [gui]
 
 - **[Architecture](docs/architecture.md)** — Full system architecture with Mermaid diagrams
 - **[Evolutions](docs/evolutions.md)** — All 108 features tracked across 7 phases
-- **[Release Notes](RELEASE_v0.3.0.md)** — v0.3.0 "Sentinel" changelog
+- **[Release Notes](RELEASE_v0.4.5.md)** — v0.4.5 "Sentinel" changelog
 
 ## License
 
