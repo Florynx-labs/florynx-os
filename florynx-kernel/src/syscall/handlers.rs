@@ -7,15 +7,22 @@
 
 use crate::fs::vfs::{VFS, OpenFlags};
 use crate::process::scheduler;
+use crate::syscall::usermem;
+use crate::gui::desktop;
+use florynx_shared::syscall_abi::{AbiHeader, AbiInfoV1, KernelTelemetryV1, UserStatV1, ABI_V1};
 
 // Error codes (POSIX-compatible)
 const EBADF: i64 = -9;
+const EFAULT: i64 = -14;
 const EINVAL: i64 = -22;
 const ENOENT: i64 = -2;
 const EACCES: i64 = -13;
+const ECHILD: i64 = -10;
+const EAGAIN: i64 = -11;
 const EISDIR: i64 = -21;
 const EEXIST: i64 = -17;
-const EFAULT: i64 = -14;
+const ESRCH: i64 = -3;
+const ENOSYS: i64 = -38;
 
 /// sys_write — write data to a file descriptor.
 /// fd=0: stdin (invalid for write)
@@ -23,19 +30,16 @@ const EFAULT: i64 = -14;
 /// fd=2: stderr → serial
 /// fd>=3: VFS file descriptor
 pub fn sys_write(fd: u64, buf_ptr: u64, len: u64) -> i64 {
-    if buf_ptr == 0 || len == 0 {
-        return EFAULT;
-    }
-    
-    let buf = unsafe {
-        core::slice::from_raw_parts(buf_ptr as *const u8, len as usize)
+    let buf = match usermem::copy_from_user(buf_ptr, len) {
+        Ok(s) => s,
+        Err(e) => return e,
     };
 
     match fd {
         0 => EBADF, // stdin not writable
         1 => {
             // stdout → serial + VGA
-            if let Ok(s) = core::str::from_utf8(buf) {
+            if let Ok(s) = core::str::from_utf8(&buf) {
                 crate::serial_print!("{}", s);
                 crate::print!("{}", s);
             }
@@ -43,7 +47,7 @@ pub fn sys_write(fd: u64, buf_ptr: u64, len: u64) -> i64 {
         }
         2 => {
             // stderr → serial only
-            if let Ok(s) = core::str::from_utf8(buf) {
+            if let Ok(s) = core::str::from_utf8(&buf) {
                 crate::serial_print!("{}", s);
             }
             len as i64
@@ -51,7 +55,7 @@ pub fn sys_write(fd: u64, buf_ptr: u64, len: u64) -> i64 {
         fd => {
             // VFS file descriptor
             let mut vfs = VFS.lock();
-            match vfs.write(fd as usize, buf) {
+            match vfs.write(fd as usize, &buf) {
                 Ok(n) => n as i64,
                 Err(_) => EBADF,
             }
@@ -63,13 +67,7 @@ pub fn sys_write(fd: u64, buf_ptr: u64, len: u64) -> i64 {
 /// fd=0: stdin (keyboard buffer)
 /// fd>=3: VFS file descriptor
 pub fn sys_read(fd: u64, buf_ptr: u64, len: u64) -> i64 {
-    if buf_ptr == 0 || len == 0 {
-        return EFAULT;
-    }
-    
-    let buf = unsafe {
-        core::slice::from_raw_parts_mut(buf_ptr as *mut u8, len as usize)
-    };
+    let mut buf = alloc::vec![0u8; len as usize];
 
     match fd {
         0 => {
@@ -80,8 +78,13 @@ pub fn sys_read(fd: u64, buf_ptr: u64, len: u64) -> i64 {
         fd => {
             // VFS file descriptor
             let mut vfs = VFS.lock();
-            match vfs.read(fd as usize, buf) {
-                Ok(n) => n as i64,
+            match vfs.read(fd as usize, &mut buf) {
+                Ok(n) => {
+                    if usermem::copy_to_user(buf_ptr, &buf[..n]).is_err() {
+                        return EFAULT;
+                    }
+                    n as i64
+                }
                 Err(_) => EBADF,
             }
         }
@@ -91,15 +94,12 @@ pub fn sys_read(fd: u64, buf_ptr: u64, len: u64) -> i64 {
 /// sys_open — open a file by path.
 /// flags: 0=read, 1=write, 2=read+write, 4=create
 pub fn sys_open(path_ptr: u64, path_len: u64, flags: u64) -> i64 {
-    if path_ptr == 0 {
-        return EFAULT;
-    }
-    
-    let path_bytes = unsafe {
-        core::slice::from_raw_parts(path_ptr as *const u8, path_len as usize)
+    let path_bytes = match usermem::copy_from_user(path_ptr, path_len) {
+        Ok(s) => s,
+        Err(e) => return e,
     };
     
-    let path = match core::str::from_utf8(path_bytes) {
+    let path = match core::str::from_utf8(&path_bytes) {
         Ok(s) => s,
         Err(_) => return EINVAL,
     };
@@ -160,7 +160,7 @@ pub fn sys_seek(fd: u64, offset: u64, _whence: u64) -> i64 {
 /// sys_exit — terminate the current process.
 pub fn sys_exit(exit_code: u64) -> i64 {
     crate::serial_println!("[syscall] exit with code {}", exit_code);
-    scheduler::exit();
+    scheduler::exit_with_code(exit_code);
     0
 }
 
@@ -180,24 +180,114 @@ pub fn sys_getpid() -> i64 {
 
 /// sys_sleep — sleep for a given number of ticks.
 pub fn sys_sleep(ticks: u64) -> i64 {
-    let start = crate::drivers::timer::pit::get_ticks();
-    while crate::drivers::timer::pit::get_ticks() - start < ticks {
-        x86_64::instructions::hlt();
-    }
+    scheduler::sleep_current(ticks);
     0
+}
+
+/// sys_wait — reap any zombie child.
+/// arg1=out_ptr where [child_id:u64, exit_code:u64] is written.
+/// arg2=flags (bit0: WNOHANG)
+pub fn sys_wait(out_ptr: u64, flags: u64, _arg3: u64) -> i64 {
+    const WNOHANG: u64 = 1;
+    match scheduler::wait_any_child() {
+        Some((child, code)) => {
+            let mut out = [0u8; 16];
+            out[..8].copy_from_slice(&child.0.to_ne_bytes());
+            out[8..].copy_from_slice(&code.to_ne_bytes());
+            match usermem::copy_to_user(out_ptr, &out) {
+                Ok(()) => 0,
+                Err(e) => e,
+            }
+        }
+        None => {
+            if !scheduler::has_any_child() {
+                ECHILD
+            } else if (flags & WNOHANG) != 0 {
+                EAGAIN
+            } else {
+                // Simple blocking behavior: sleep one tick and let caller retry.
+                scheduler::sleep_current(1);
+                EAGAIN
+            }
+        }
+    }
+}
+
+/// sys_kill — mark a task as zombie.
+/// arg1=pid, arg2=exit_code
+pub fn sys_kill(pid: u64, code: u64, _arg3: u64) -> i64 {
+    if scheduler::kill(crate::process::task::TaskId(pid), code) {
+        0
+    } else {
+        ESRCH
+    }
+}
+
+/// SYS_ABI_INFO
+/// arg1=out_ptr, arg2=out_len, arg3=reserved
+pub fn sys_abi_info(out_ptr: u64, out_len: u64, _arg3: u64) -> i64 {
+    if out_len < core::mem::size_of::<AbiInfoV1>() as u64 {
+        return EINVAL;
+    }
+    let info = AbiInfoV1 {
+        hdr: AbiHeader {
+            size: core::mem::size_of::<AbiInfoV1>() as u16,
+            version: ABI_V1,
+        },
+        abi_major: 1,
+        abi_minor: 0,
+        user_stat_size: core::mem::size_of::<UserStatV1>() as u32,
+    };
+    let bytes = unsafe {
+        core::slice::from_raw_parts(
+            (&info as *const AbiInfoV1).cast::<u8>(),
+            core::mem::size_of::<AbiInfoV1>(),
+        )
+    };
+    match usermem::copy_to_user(out_ptr, bytes) {
+        Ok(()) => 0,
+        Err(e) => e,
+    }
+}
+
+/// SYS_DEBUG_TELEMETRY
+/// arg1=out_ptr, arg2=out_len, arg3=reserved
+pub fn sys_debug_telemetry(out_ptr: u64, out_len: u64, _arg3: u64) -> i64 {
+    if out_len < core::mem::size_of::<KernelTelemetryV1>() as u64 {
+        return EINVAL;
+    }
+    let fault = crate::arch::x86_64::idt::fault_telemetry();
+    let panic = crate::core_kernel::panic::panic_telemetry();
+    let out = KernelTelemetryV1 {
+        hdr: AbiHeader {
+            size: core::mem::size_of::<KernelTelemetryV1>() as u16,
+            version: ABI_V1,
+        },
+        page_fault_total: fault.page_fault_total,
+        page_fault_user: fault.page_fault_user,
+        page_fault_kernel: fault.page_fault_kernel,
+        panic_count: panic.panic_count,
+    };
+    let bytes = unsafe {
+        core::slice::from_raw_parts(
+            (&out as *const KernelTelemetryV1).cast::<u8>(),
+            core::mem::size_of::<KernelTelemetryV1>(),
+        )
+    };
+    match usermem::copy_to_user(out_ptr, bytes) {
+        Ok(()) => 0,
+        Err(e) => e,
+    }
 }
 
 /// sys_mkdir — create a directory.
 pub fn sys_mkdir(path_ptr: u64, path_len: u64) -> i64 {
-    if path_ptr == 0 {
-        return EFAULT;
-    }
-    
-    let path_bytes = unsafe {
-        core::slice::from_raw_parts(path_ptr as *const u8, path_len as usize)
+    let path_bytes = match usermem::copy_from_user(path_ptr, path_len) {
+        Ok(s) => s,
+        Err(e) => return e,
     };
     
-    let path = match core::str::from_utf8(path_bytes) {
+    let path = match core::str::from_utf8(&path_bytes) {
         Ok(s) => s,
         Err(_) => return EINVAL,
     };
@@ -213,15 +303,12 @@ pub fn sys_mkdir(path_ptr: u64, path_len: u64) -> i64 {
 
 /// sys_stat — get file statistics.
 pub fn sys_stat(path_ptr: u64, path_len: u64, stat_ptr: u64) -> i64 {
-    if path_ptr == 0 || stat_ptr == 0 {
-        return EFAULT;
-    }
-    
-    let path_bytes = unsafe {
-        core::slice::from_raw_parts(path_ptr as *const u8, path_len as usize)
+    let path_bytes = match usermem::copy_from_user(path_ptr, path_len) {
+        Ok(s) => s,
+        Err(e) => return e,
     };
     
-    let path = match core::str::from_utf8(path_bytes) {
+    let path = match core::str::from_utf8(&path_bytes) {
         Ok(s) => s,
         Err(_) => return EINVAL,
     };
@@ -229,27 +316,121 @@ pub fn sys_stat(path_ptr: u64, path_len: u64, stat_ptr: u64) -> i64 {
     let vfs = VFS.lock();
     match vfs.stat(path) {
         Ok(stat) => {
-            // Write stat info to user buffer
-            let out = unsafe { &mut *(stat_ptr as *mut UserStat) };
-            out.inode = stat.inode;
-            out.size = stat.size;
-            out.file_type = match stat.file_type {
-                crate::fs::vfs::FileType::Regular => 1,
-                crate::fs::vfs::FileType::Directory => 2,
-                crate::fs::vfs::FileType::SymLink => 3,
-                crate::fs::vfs::FileType::Device => 4,
-                crate::fs::vfs::FileType::Pipe => 5,
+            let out = UserStatV1 {
+                hdr: AbiHeader {
+                    size: core::mem::size_of::<UserStatV1>() as u16,
+                    version: ABI_V1,
+                },
+                inode: stat.inode,
+                size: stat.size,
+                file_type: match stat.file_type {
+                    crate::fs::vfs::FileType::Regular => 1,
+                    crate::fs::vfs::FileType::Directory => 2,
+                    crate::fs::vfs::FileType::SymLink => 3,
+                    crate::fs::vfs::FileType::Device => 4,
+                    crate::fs::vfs::FileType::Pipe => 5,
+                },
             };
+            let out_bytes = unsafe {
+                core::slice::from_raw_parts(
+                    (&out as *const UserStatV1).cast::<u8>(),
+                    core::mem::size_of::<UserStatV1>(),
+                )
+            };
+            if let Err(e) = usermem::copy_to_user(stat_ptr, out_bytes) {
+                return e;
+            }
             0
         }
         Err(_) => ENOENT,
     }
 }
 
-/// User-space stat structure
-#[repr(C)]
-pub struct UserStat {
-    pub inode: u64,
-    pub size: u64,
-    pub file_type: u64,
+/// SYS_GUI_CREATE_WINDOW
+/// arg1=x, arg2=y, arg3=packed_wh (upper32=w, lower32=h)
+pub fn sys_gui_create_window(x: u64, y: u64, packed_wh: u64) -> i64 {
+    let w = ((packed_wh >> 32) & 0xFFFF_FFFF) as usize;
+    let h = (packed_wh & 0xFFFF_FFFF) as usize;
+    match desktop::create_user_window(x as usize, y as usize, w, h, "Userland App") {
+        Some(id) => id as i64,
+        None => EINVAL,
+    }
+}
+
+/// SYS_GUI_DRAW_RECT
+/// Minimal v1: accept call and request redraw.
+pub fn sys_gui_draw_rect(_win_id: u64, _packed_xy: u64, _packed_wh_color: u64) -> i64 {
+    let win_id = _win_id as usize;
+    let x = ((_packed_xy >> 32) & 0xFFFF_FFFF) as usize;
+    let y = (_packed_xy & 0xFFFF_FFFF) as usize;
+    let w = ((_packed_wh_color >> 48) & 0xFFFF) as usize;
+    let h = ((_packed_wh_color >> 32) & 0xFFFF) as usize;
+    let rgb = (_packed_wh_color & 0xFFFF_FFFF) as u32;
+    if desktop::set_window_rect(win_id, x, y, w.max(1), h.max(1), rgb) {
+        desktop::request_redraw();
+        0
+    } else {
+        EINVAL
+    }
+}
+
+/// SYS_GUI_DRAW_TEXT
+/// arg1=win_id, arg2=text_ptr, arg3=text_len
+pub fn sys_gui_draw_text(win_id: u64, text_ptr: u64, text_len: u64) -> i64 {
+    let text_bytes = match usermem::copy_from_user(text_ptr, text_len) {
+        Ok(s) => s,
+        Err(e) => return e,
+    };
+    let text = match core::str::from_utf8(&text_bytes) {
+        Ok(s) => s,
+        Err(_) => return EINVAL,
+    };
+    if desktop::set_window_text(win_id as usize, text) {
+        desktop::request_redraw();
+        0
+    } else {
+        EINVAL
+    }
+}
+
+/// SYS_GUI_POLL_EVENT
+/// Minimal v1: no event delivery yet.
+pub fn sys_gui_poll_event(_event_ptr: u64, _arg2: u64, _arg3: u64) -> i64 {
+    if let Some(ev) = crate::gui::event_bus::pop_user_event() {
+        if let Err(e) = usermem::copy_to_user(_event_ptr, &ev.to_ne_bytes()) {
+            return e;
+        }
+        1
+    } else {
+        0
+    }
+}
+
+/// SYS_GUI_INVALIDATE
+pub fn sys_gui_invalidate(_win_id: u64, _arg2: u64, _arg3: u64) -> i64 {
+    desktop::request_redraw();
+    0
+}
+
+/// SYS_GUI_FOCUS_WINDOW
+pub fn sys_gui_focus_window(_win_id: u64, _arg2: u64, _arg3: u64) -> i64 {
+    if desktop::focus_window(_win_id as usize) {
+        0
+    } else {
+        EINVAL
+    }
+}
+
+/// SYS_GUI_DESTROY_WINDOW
+pub fn sys_gui_destroy_window(_win_id: u64, _arg2: u64, _arg3: u64) -> i64 {
+    if desktop::destroy_window(_win_id as usize) {
+        0
+    } else {
+        EINVAL
+    }
+}
+
+/// SYS_GUI_SET_WALLPAPER (not implemented yet)
+pub fn sys_gui_set_wallpaper(_path_ptr: u64, _path_len: u64, _arg3: u64) -> i64 {
+    ENOSYS
 }

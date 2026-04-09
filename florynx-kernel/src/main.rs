@@ -62,6 +62,11 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
         .expect("heap initialization failed");
     serial_println!("[boot] heap initialized");
 
+    // P0 isolation guard: kernel mappings must remain supervisor-only.
+    florynx_kernel::memory::paging::audit_kernel_supervisor_mappings()
+        .expect("kernel mapping isolation audit failed");
+    serial_println!("[boot] kernel mapping isolation audit passed");
+
     // Initialize VFS, ramdisk, and devfs
     florynx_kernel::fs::ramdisk::init();
     florynx_kernel::fs::vfs::init();
@@ -126,6 +131,8 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     
     loop {
         x86_64::instructions::hlt();
+        florynx_kernel::drivers::process_events();
+        florynx_kernel::drivers::update_deferred();
         
         // Only redraw if enough time has passed (frame limiter)
         let current_tick = florynx_kernel::time::clock::uptime_ticks();

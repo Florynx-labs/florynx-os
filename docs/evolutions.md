@@ -85,7 +85,21 @@
 - ✅ Per-window offscreen buffers + dirty flag
 - ✅ Compositor: tick_animations → dirty → merge → redraw → flush
 - ✅ IPC event bus: pub/sub, 32 subscriptions, 64-entry ring buffers
-- ✅ 108 features total across 7 phases
+
+**Phase 8: Kernel/Userland Split + KDE Plasma Shell** ✅ COMPLETED
+- ✅ Created florynx-userland/ crate (separate from kernel)
+- ✅ Created shared/ crate (syscall ABI + common types)
+- ✅ KDE Plasma-style desktop shell (gui/shell.rs)
+- ✅ Bottom panel: App Menu + Taskbar + System Tray (gui/panel.rs)
+- ✅ Kickoff-style app launcher with categories (gui/app_menu.rs)
+- ✅ Task manager with active window highlighting (gui/taskbar.rs)
+- ✅ System tray with clock display (gui/systray.rs)
+- ✅ Wallpaper manager with 3 default backgrounds (gui/wallpaper.rs)
+- ✅ Breeze Bioluminescent theme (gui/theme.rs)
+- ✅ Built-in apps: Files, Terminal, Settings, Monitor, Editor
+- ✅ Session manager + notification daemon
+- ✅ Syscall ABI: 11 POSIX + 7 GUI + 3 IPC syscall numbers
+- ✅ Shared types: Rect, Color, GuiEvent, WindowParams, WinFlags
 
 ---
 

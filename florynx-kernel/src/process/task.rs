@@ -31,10 +31,10 @@ pub enum TaskState {
     Ready,
     /// Task is currently running on a CPU.
     Running,
-    /// Task is blocked waiting for an event.
-    Blocked,
-    /// Task has terminated.
-    Terminated,
+    /// Task is sleeping/waiting and not runnable.
+    Sleeping,
+    /// Task exited and awaits reap/cleanup.
+    Zombie,
 }
 
 /// Priority level for task scheduling.
@@ -97,6 +97,12 @@ pub struct Task {
     pub time_slice: u64,
     /// Capability set for this task
     pub capabilities: CapabilitySet,
+    /// Parent task identifier (if any)
+    pub parent: Option<TaskId>,
+    /// Exit status if task reached Zombie
+    pub exit_code: Option<u64>,
+    /// Absolute tick when sleeping task should wake
+    pub wake_tick: Option<u64>,
 }
 
 impl Task {
@@ -113,6 +119,9 @@ impl Task {
             stack: None,
             time_slice: 10, // Default 10 ticks
             capabilities: CapabilitySet::kernel(), // Kernel tasks get all caps
+            parent: None,
+            exit_code: None,
+            wake_tick: None,
         }
     }
 
@@ -134,6 +143,9 @@ impl Task {
                 TaskPriority::Realtime => 50,
             },
             capabilities: CapabilitySet::kernel(),
+            parent: None,
+            exit_code: None,
+            wake_tick: None,
         }
     }
 

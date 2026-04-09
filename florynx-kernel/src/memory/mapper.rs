@@ -30,6 +30,27 @@ pub fn map_page(
     Ok(())
 }
 
+/// Map a virtual page for kernel-only access.
+/// Forces USER_ACCESSIBLE off even if passed accidentally.
+pub fn map_kernel_page(
+    mapper: &mut impl Mapper<Size4KiB>,
+    frame_allocator: &mut impl FrameAllocator<Size4KiB>,
+    virtual_addr: VirtAddr,
+    physical_addr: PhysAddr,
+    writable: bool,
+    executable: bool,
+) -> Result<(), &'static str> {
+    let mut flags = PageTableFlags::PRESENT;
+    if writable {
+        flags |= PageTableFlags::WRITABLE;
+    }
+    if !executable {
+        flags |= PageTableFlags::NO_EXECUTE;
+    }
+    flags.remove(PageTableFlags::USER_ACCESSIBLE);
+    map_page(mapper, frame_allocator, virtual_addr, physical_addr, flags)
+}
+
 /// Map a virtual page for user-space access.
 /// Automatically sets the USER_ACCESSIBLE flag and disables execution if requested.
 pub fn map_user_page(

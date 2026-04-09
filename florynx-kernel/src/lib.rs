@@ -45,6 +45,9 @@ pub fn init(_boot_info: &'static bootloader::BootInfo) {
     // 3. Hardware interrupts (PIC + PIT configured, but NOT enabled yet)
     arch::x86_64::interrupts::init();
 
+    // 4. Driver registry setup (persistent instances, no per-IRQ construction)
+    drivers::init_registry();
+
     serial_println!("[kernel] core init complete (interrupts still disabled)");
 }
 

@@ -18,6 +18,7 @@ pub mod animation;
 pub mod window;
 pub mod dock;
 pub mod desktop;
+pub mod event_bus;
 pub mod console;
 pub mod icons;
 pub mod widgets;

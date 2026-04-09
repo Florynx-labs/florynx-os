@@ -6,10 +6,40 @@
 
 use core::panic::PanicInfo;
 use core::fmt::Write;
+use core::sync::atomic::{AtomicU64, AtomicU8, Ordering};
+
+/// Panic policy controls terminal behavior after panic diagnostics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PanicPolicy {
+    Halt = 0,
+    Reboot = 1,
+}
+
+static PANIC_POLICY: AtomicU8 = AtomicU8::new(PanicPolicy::Halt as u8);
+static PANIC_COUNT: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Debug, Clone, Copy)]
+pub struct PanicTelemetry {
+    pub panic_count: u64,
+    pub policy: PanicPolicy,
+}
+
+pub fn set_panic_policy(policy: PanicPolicy) {
+    PANIC_POLICY.store(policy as u8, Ordering::Relaxed);
+}
+
+pub fn panic_telemetry() -> PanicTelemetry {
+    PanicTelemetry {
+        panic_count: PANIC_COUNT.load(Ordering::Relaxed),
+        policy: current_policy(),
+    }
+}
 
 /// The kernel panic handler — prints error info and halts.
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
+    PANIC_COUNT.fetch_add(1, Ordering::Relaxed);
+
     // Disable interrupts to prevent further issues
     x86_64::instructions::interrupts::disable();
 
@@ -24,9 +54,32 @@ fn panic(info: &PanicInfo) -> ! {
     // Draw panic message to framebuffer if available (visible in GUI mode)
     draw_panic_to_framebuffer(info);
 
-    // Halt the CPU in an infinite loop
-    loop {
-        x86_64::instructions::hlt();
+    match current_policy() {
+        PanicPolicy::Halt => {
+            crate::serial_println!("[panic] policy=halt");
+            loop {
+                x86_64::instructions::hlt();
+            }
+        }
+        PanicPolicy::Reboot => {
+            crate::serial_println!("[panic] policy=reboot (kbd controller reset)");
+            unsafe {
+                // Standard x86 reboot trigger via keyboard controller.
+                crate::arch::x86_64::asm_utils::outb(0x64, 0xFE);
+            }
+            // If reset does not trigger, fall back to halt.
+            loop {
+                x86_64::instructions::hlt();
+            }
+        }
+    }
+}
+
+#[inline]
+fn current_policy() -> PanicPolicy {
+    match PANIC_POLICY.load(Ordering::Relaxed) {
+        1 => PanicPolicy::Reboot,
+        _ => PanicPolicy::Halt,
     }
 }
 

@@ -49,6 +49,10 @@ pub struct Window {
     pub buf_h: usize,
     /// True if the window content changed and needs to be redrawn to its buffer.
     pub dirty: bool,
+    /// Optional userland rectangle primitive: (x, y, w, h, rgb).
+    pub user_rect: Option<(usize, usize, usize, usize, u32)>,
+    /// True if this window is created from userland syscalls.
+    pub user_owned: bool,
 }
 
 impl Window {
@@ -77,6 +81,8 @@ impl Window {
             buf_w,
             buf_h,
             dirty: true, // needs initial draw
+            user_rect: None,
+            user_owned: false,
         }
     }
 
@@ -237,6 +243,16 @@ impl Window {
             renderer::draw_char(fb, byte, cx + col * 8, line_y, t.text_dim, 1);
             col += 1;
         }
+
+        // Optional userland rectangle draw primitive (inside content area).
+        if let Some((rx, ry, rw, rh, rgb)) = self.user_rect {
+            let r = ((rgb >> 16) & 0xFF) as u8;
+            let g = ((rgb >> 8) & 0xFF) as u8;
+            let b = (rgb & 0xFF) as u8;
+            let draw_x = cx + rx;
+            let draw_y = cy + ry;
+            renderer::draw_rect(fb, draw_x, draw_y, rw, rh, Color::rgb(r, g, b));
+        }
     }
 
     /// Handle an event. Returns true if the event was consumed.
@@ -320,5 +336,14 @@ impl Window {
     /// Mark this window as needing a redraw (e.g. after active state change).
     pub fn mark_dirty(&mut self) {
         self.dirty = true;
+    }
+
+    pub fn set_user_rect(&mut self, x: usize, y: usize, w: usize, h: usize, rgb: u32) {
+        self.user_rect = Some((x, y, w, h, rgb));
+        self.dirty = true;
+    }
+
+    pub fn set_user_owned(&mut self, user_owned: bool) {
+        self.user_owned = user_owned;
     }
 }

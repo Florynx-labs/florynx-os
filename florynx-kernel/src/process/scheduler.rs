@@ -14,6 +14,7 @@ use lazy_static::lazy_static;
 use spin::Mutex;
 
 use super::task::{Task, TaskState, TaskId, TaskPriority};
+use crate::security::capability::CapabilitySet;
 
 lazy_static! {
     static ref SCHEDULER: Mutex<Scheduler> = Mutex::new(Scheduler::new());
@@ -51,6 +52,7 @@ impl Scheduler {
     }
 
     fn add_task_internal(&mut self, mut task: Task) -> usize {
+        task.parent = self.current().map(|t| t.id);
         for (i, slot) in self.tasks.iter_mut().enumerate() {
             if slot.is_none() {
                 task.state = TaskState::Ready;
@@ -85,9 +87,7 @@ impl Scheduler {
             if let Some(ref mut task) = self.tasks[prev] {
                 if task.state == TaskState::Running {
                     task.state = TaskState::Ready;
-                    if task.state != TaskState::Terminated {
-                        self.ready_queue.push_back(prev);
-                    }
+                    self.ready_queue.push_back(prev);
                 }
             }
         }
@@ -107,25 +107,31 @@ impl Scheduler {
     fn block_current(&mut self) {
         if let Some(idx) = self.current_task {
             if let Some(ref mut task) = self.tasks[idx] {
-                task.state = TaskState::Blocked;
+                task.state = TaskState::Sleeping;
             }
         }
     }
 
     fn wake_task(&mut self, idx: usize) {
         if let Some(ref mut task) = self.tasks[idx] {
-            if task.state == TaskState::Blocked {
+            if task.state == TaskState::Sleeping {
                 task.state = TaskState::Ready;
+                task.wake_tick = None;
                 self.ready_queue.push_back(idx);
             }
         }
     }
 
-    fn terminate_current(&mut self) {
+    fn terminate_current(&mut self, exit_code: u64) {
         if let Some(idx) = self.current_task {
             if let Some(ref mut task) = self.tasks[idx] {
-                task.state = TaskState::Terminated;
-                crate::serial_println!("[scheduler] task '{}' terminated", task.name);
+                task.state = TaskState::Zombie;
+                task.exit_code = Some(exit_code);
+                crate::serial_println!(
+                    "[scheduler] task '{}' became zombie (code={})",
+                    task.name,
+                    exit_code
+                );
             }
             self.current_task = None;
         }
@@ -195,6 +201,23 @@ pub fn timer_tick() {
         if !sched.enabled {
             return;
         }
+
+        // Wake sleeping tasks whose timeout elapsed.
+        let now = crate::drivers::timer::pit::get_ticks();
+        for idx in 0..sched.tasks.len() {
+            if let Some(ref mut task) = sched.tasks[idx] {
+                if task.state == TaskState::Sleeping {
+                    if let Some(wake_tick) = task.wake_tick {
+                        if wake_tick <= now {
+                            task.state = TaskState::Ready;
+                            task.wake_tick = None;
+                            sched.ready_queue.push_back(idx);
+                        }
+                    }
+                }
+            }
+        }
+
         if sched.current_time_slice > 0 {
             sched.current_time_slice -= 1;
         }
@@ -225,8 +248,35 @@ pub fn wake(id: TaskId) {
 
 /// Terminate the current task
 pub fn exit() {
+    exit_with_code(0);
+}
+
+/// Terminate current task with explicit exit code and leave as zombie.
+pub fn exit_with_code(exit_code: u64) {
     let mut sched = SCHEDULER.lock();
-    sched.terminate_current();
+    sched.terminate_current(exit_code);
+    let _ = sched.schedule_next();
+}
+
+/// Handle a user-mode page fault by terminating the current task and
+/// immediately selecting the next runnable task.
+pub fn handle_user_page_fault(fault_addr: u64, error_bits: u64) {
+    let mut sched = SCHEDULER.lock();
+    if let Some(idx) = sched.current_task {
+        if let Some(ref mut task) = sched.tasks[idx] {
+            task.state = TaskState::Zombie;
+            task.exit_code = Some(139);
+            crate::serial_println!(
+                "[scheduler] user page fault: task '{}' (id={}) addr=0x{:x} err=0x{:x}",
+                task.name,
+                task.id.0,
+                fault_addr,
+                error_bits
+            );
+        }
+        sched.current_task = None;
+    }
+    let _ = sched.schedule_next();
 }
 
 /// Yield CPU to next task
@@ -239,6 +289,88 @@ pub fn yield_now() {
 pub fn current_task_id() -> Option<TaskId> {
     let sched = SCHEDULER.lock();
     sched.current().map(|t| t.id)
+}
+
+/// Get capabilities of current task, if one is running.
+pub fn current_task_capabilities() -> Option<CapabilitySet> {
+    let sched = SCHEDULER.lock();
+    sched.current().map(|t| t.capabilities)
+}
+
+/// Put current task to sleep for a number of timer ticks.
+pub fn sleep_current(ticks: u64) {
+    let mut sched = SCHEDULER.lock();
+    if let Some(idx) = sched.current_task {
+        let wake_tick = crate::drivers::timer::pit::get_ticks().saturating_add(ticks);
+        if let Some(ref mut task) = sched.tasks[idx] {
+            task.state = TaskState::Sleeping;
+            task.wake_tick = Some(wake_tick);
+        }
+        sched.current_task = None;
+        let _ = sched.schedule_next();
+    }
+}
+
+/// Wait for any zombie child of current task.
+/// Returns (child_id, exit_code) if one is reaped.
+pub fn wait_any_child() -> Option<(TaskId, u64)> {
+    let mut sched = SCHEDULER.lock();
+    let parent_id = sched.current().map(|t| t.id)?;
+    for slot in sched.tasks.iter_mut() {
+        if let Some(task) = slot {
+            if task.parent == Some(parent_id) && task.state == TaskState::Zombie {
+                let id = task.id;
+                let code = task.exit_code.unwrap_or(0);
+                let cleanup = crate::process::process::cleanup_task_resources(id);
+                if cleanup.closed_fds > 0 {
+                    crate::serial_println!(
+                        "[scheduler] reaped task {} and closed {} fd(s)",
+                        id.0,
+                        cleanup.closed_fds
+                    );
+                }
+                *slot = None; // reap
+                return Some((id, code));
+            }
+        }
+    }
+    None
+}
+
+/// Returns true if current task has at least one child task.
+pub fn has_any_child() -> bool {
+    let sched = SCHEDULER.lock();
+    let parent_id = match sched.current().map(|t| t.id) {
+        Some(id) => id,
+        None => return false,
+    };
+    sched.tasks.iter().any(|slot| {
+        if let Some(task) = slot {
+            task.parent == Some(parent_id)
+        } else {
+            false
+        }
+    })
+}
+
+/// Kill task by ID by transitioning it to zombie.
+pub fn kill(id: TaskId, exit_code: u64) -> bool {
+    let mut sched = SCHEDULER.lock();
+    for (idx, slot) in sched.tasks.iter_mut().enumerate() {
+        if let Some(task) = slot {
+            if task.id == id {
+                task.state = TaskState::Zombie;
+                task.exit_code = Some(exit_code);
+                task.wake_tick = None;
+                if sched.current_task == Some(idx) {
+                    sched.current_task = None;
+                    let _ = sched.schedule_next();
+                }
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// Get scheduler statistics

@@ -66,16 +66,35 @@ pub fn handle_keyboard_interrupt() {
                             return; // Silently ignore
                         }
                         _ => {
-                            // Other unhandled keys - log for debugging
-                            crate::serial_println!("[keyboard] unhandled raw key: {:?}", raw);
+                            // Other unhandled keys are ignored to keep IRQ path fast.
                             return;
                         }
                     }
                 }
             };
 
-            // Dispatch key event to desktop
-            crate::gui::desktop::on_key_press(gui_key);
+            // Push into central driver event queue (IRQ path stays minimal).
+            match gui_key {
+                crate::gui::event::Key::Char(c) => {
+                    crate::drivers::event::push_event(crate::drivers::event::Event::KeyPress(c));
+                }
+                crate::gui::event::Key::Backspace => {
+                    crate::drivers::event::push_event(crate::drivers::event::Event::KeyPress('\x08'));
+                }
+                crate::gui::event::Key::Enter => {
+                    crate::drivers::event::push_event(crate::drivers::event::Event::KeyPress('\n'));
+                }
+                crate::gui::event::Key::Tab => {
+                    crate::drivers::event::push_event(crate::drivers::event::Event::KeyPress('\t'));
+                }
+                crate::gui::event::Key::Escape => {
+                    crate::drivers::event::push_event(crate::drivers::event::Event::KeyPress('\x1b'));
+                }
+                _ => {
+                    // Non-character keys are intentionally ignored by the
+                    // low-level generic event queue in this phase.
+                }
+            }
         }
     }
 }

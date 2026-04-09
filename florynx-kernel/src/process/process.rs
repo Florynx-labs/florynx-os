@@ -95,3 +95,21 @@ impl ProcessTable {
         self.processes.iter_mut().find(|p| p.pid == pid)
     }
 }
+
+/// Result of best-effort task resource cleanup during reap.
+#[derive(Debug, Clone, Copy)]
+pub struct TaskCleanupReport {
+    pub closed_fds: usize,
+    pub released_process_links: usize,
+}
+
+/// Best-effort cleanup hook for task-owned resources.
+/// This is intentionally lightweight for now and can be extended with
+/// address-space frame reclamation once per-task memory ownership is tracked.
+pub fn cleanup_task_resources(task_id: TaskId) -> TaskCleanupReport {
+    let closed_fds = crate::fs::vfs::close_task_fds(task_id.0);
+    TaskCleanupReport {
+        closed_fds,
+        released_process_links: 0,
+    }
+}

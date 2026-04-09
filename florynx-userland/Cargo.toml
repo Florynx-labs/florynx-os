@@ -1,0 +1,8 @@
+[package]
+name = "florynx-userland"
+version = "0.4.5"
+edition = "2021"
+description = "FlorynxOS userland — KDE Plasma-inspired desktop shell"
+
+[dependencies]
+florynx-shared = { path = "../shared" }

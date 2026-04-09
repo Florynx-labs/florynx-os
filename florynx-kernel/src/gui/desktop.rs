@@ -117,6 +117,18 @@ impl WindowManager {
         changed
     }
 
+    fn find_slot_by_id(&self, win_id: usize) -> Option<usize> {
+        for i in 0..self.count {
+            let slot = self.order[i];
+            if let Some(ref w) = self.windows[slot] {
+                if w.id == win_id {
+                    return Some(slot);
+                }
+            }
+        }
+        None
+    }
+
     /// Draw all windows back-to-front.
     fn draw(&self, fb: &mut FramebufferManager) {
         // Draw back to front (last in order array = back-most)
@@ -177,6 +189,50 @@ impl WindowManager {
             }
         }
         None
+    }
+
+    /// Remove a window by its id. Returns removed bounds for invalidation.
+    fn remove_window_by_id(&mut self, win_id: usize) -> Option<Rect> {
+        let mut slot_to_remove = None;
+        for i in 0..self.count {
+            let slot = self.order[i];
+            if let Some(ref w) = self.windows[slot] {
+                if w.id == win_id {
+                    slot_to_remove = Some(slot);
+                    break;
+                }
+            }
+        }
+        let slot = slot_to_remove?;
+        let removed_bounds = self.windows[slot].as_ref().map(|w| w.bounds_with_shadow())?;
+
+        self.windows[slot] = None;
+
+        // Remove slot from z-order list.
+        let mut pos = None;
+        for i in 0..self.count {
+            if self.order[i] == slot {
+                pos = Some(i);
+                break;
+            }
+        }
+        if let Some(p) = pos {
+            for i in p..self.count.saturating_sub(1) {
+                self.order[i] = self.order[i + 1];
+            }
+            self.count = self.count.saturating_sub(1);
+        }
+
+        // Recompute active window as front-most, if any.
+        self.active = if self.count > 0 { Some(self.order[0]) } else { None };
+        if let Some(active_slot) = self.active {
+            if let Some(ref mut w) = self.windows[active_slot] {
+                w.active = true;
+                w.mark_dirty();
+            }
+        }
+
+        Some(removed_bounds)
     }
 }
 
@@ -524,6 +580,30 @@ impl Desktop {
         self.needs_full_redraw = true;
     }
 
+    fn active_user_window_id(&self) -> Option<usize> {
+        let active = self.wm.active?;
+        let w = self.wm.windows[active].as_ref()?;
+        if w.user_owned { Some(w.id) } else { None }
+    }
+
+    fn active_user_window_slot(&self) -> Option<usize> {
+        let active = self.wm.active?;
+        let w = self.wm.windows[active].as_ref()?;
+        if w.user_owned { Some(active) } else { None }
+    }
+
+    fn active_user_window_contains(&self, x: usize, y: usize) -> bool {
+        let active = match self.wm.active {
+            Some(a) => a,
+            None => return false,
+        };
+        let w = match self.wm.windows[active].as_ref() {
+            Some(w) => w,
+            None => return false,
+        };
+        w.user_owned && w.bounds().contains(x, y)
+    }
+
     /// Handle dock icon click - create appropriate window
     fn on_dock_click(&mut self, icon_idx: usize) {
         use crate::gui::window::Window;
@@ -625,6 +705,52 @@ pub fn draw() {
 /// Redraw only what changed. Uses dirty rects for drag, full redraw otherwise.
 /// Called from hlt_loop after each HLT wake.
 pub fn redraw_if_needed() {
+    // Step 0: Drain queued input events (IRQ-safe decoupling).
+    while let Some(ev) = crate::gui::event_bus::pop_event() {
+        match ev {
+            crate::gui::event_bus::GuiInputEvent::MouseState { x, y, buttons } => {
+                on_mouse_update(x, y, buttons);
+                // Keep cursor responsiveness by redrawing in non-IRQ context.
+                crate::gui::renderer::update_cursor(x, y);
+                if let Some(ref desktop) = *DESKTOP.lock() {
+                    if desktop.active_user_window_contains(x, y) {
+                        if let Some(slot) = desktop.active_user_window_slot() {
+                            if let Some(ref w) = desktop.wm.windows[slot] {
+                                crate::gui::event_bus::push_user_mouse_event(w.id as u32, x, y, buttons);
+                            }
+                        }
+                    }
+                }
+            }
+            crate::gui::event_bus::GuiInputEvent::KeyPress { key } => {
+                on_key_press(key);
+                let key_code: u16 = match key {
+                    crate::gui::event::Key::Char(c) => c as u16,
+                    crate::gui::event::Key::Backspace => 0x0008,
+                    crate::gui::event::Key::Enter => 0x000D,
+                    crate::gui::event::Key::Tab => 0x0009,
+                    crate::gui::event::Key::Escape => 0x001B,
+                    crate::gui::event::Key::ArrowUp => 0x0101,
+                    crate::gui::event::Key::ArrowDown => 0x0102,
+                    crate::gui::event::Key::ArrowLeft => 0x0103,
+                    crate::gui::event::Key::ArrowRight => 0x0104,
+                    crate::gui::event::Key::Delete => 0x007F,
+                    crate::gui::event::Key::Home => 0x0105,
+                    crate::gui::event::Key::End => 0x0106,
+                    crate::gui::event::Key::PageUp => 0x0107,
+                    crate::gui::event::Key::PageDown => 0x0108,
+                };
+                if let Some(ref desktop) = *DESKTOP.lock() {
+                    if let Some(slot) = desktop.active_user_window_slot() {
+                        if let Some(ref w) = desktop.wm.windows[slot] {
+                            crate::gui::event_bus::push_user_key_event(w.id as u32, key_code);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // Step 1: Tick animations (may generate new dirty rects)
     {
         if let Some(ref mut guard) = DESKTOP.try_lock() {
@@ -693,4 +819,122 @@ pub fn on_key_press(key: crate::gui::event::Key) {
     if let Some(ref mut desktop) = *guard {
         desktop.on_key(key);
     }
+}
+
+/// Create a user window from syscall path.
+pub fn create_user_window(x: usize, y: usize, w: usize, h: usize, title: &str) -> Option<usize> {
+    let mut guard = DESKTOP.lock();
+    let desktop = guard.as_mut()?;
+    let mut win = Window::new(0, x, y, w.max(160), h.max(100), title);
+    win.set_user_owned(true);
+    win.set_content("Userland window connected via syscall");
+    let id = desktop.add_window(win);
+    crate::gui::event_bus::push_user_window_created(id as u32);
+    Some(id)
+}
+
+/// Set textual content of a window by id.
+pub fn set_window_text(win_id: usize, text: &str) -> bool {
+    let mut guard = DESKTOP.lock();
+    let desktop = match guard.as_mut() {
+        Some(d) => d,
+        None => return false,
+    };
+
+    for i in 0..desktop.wm.count {
+        let slot = desktop.wm.order[i];
+        let mut dirty_bounds = None;
+        if let Some(ref mut w) = desktop.wm.windows[slot] {
+            if w.id == win_id {
+                w.set_content(text);
+                dirty_bounds = Some(w.bounds_with_shadow());
+            }
+        }
+        if let Some(bounds) = dirty_bounds {
+            desktop.mark_dirty(bounds);
+            return true;
+        }
+    }
+    false
+}
+
+/// Request full desktop redraw from external callers (e.g. syscalls).
+pub fn request_redraw() {
+    let mut guard = DESKTOP.lock();
+    if let Some(ref mut desktop) = *guard {
+        desktop.request_redraw();
+    }
+}
+
+/// Set a rectangle primitive on a target user window.
+pub fn set_window_rect(win_id: usize, x: usize, y: usize, w: usize, h: usize, rgb: u32) -> bool {
+    let mut guard = DESKTOP.lock();
+    let desktop = match guard.as_mut() {
+        Some(d) => d,
+        None => return false,
+    };
+
+    for i in 0..desktop.wm.count {
+        let slot = desktop.wm.order[i];
+        let mut dirty_bounds = None;
+        if let Some(ref mut win) = desktop.wm.windows[slot] {
+            if win.id == win_id {
+                win.set_user_rect(x, y, w, h, rgb);
+                dirty_bounds = Some(win.bounds_with_shadow());
+            }
+        }
+        if let Some(bounds) = dirty_bounds {
+            desktop.mark_dirty(bounds);
+            return true;
+        }
+    }
+    false
+}
+
+/// Destroy a window by id.
+pub fn destroy_window(win_id: usize) -> bool {
+    let mut guard = DESKTOP.lock();
+    let desktop = match guard.as_mut() {
+        Some(d) => d,
+        None => return false,
+    };
+    if let Some(bounds) = desktop.wm.remove_window_by_id(win_id) {
+        desktop.mark_dirty(bounds);
+        desktop.request_redraw();
+        crate::gui::event_bus::push_user_window_destroyed(win_id as u32);
+        true
+    } else {
+        false
+    }
+}
+
+/// Focus an existing window by id.
+pub fn focus_window(win_id: usize) -> bool {
+    let mut guard = DESKTOP.lock();
+    let desktop = match guard.as_mut() {
+        Some(d) => d,
+        None => return false,
+    };
+
+    let old_active = desktop.wm.active;
+    let slot = match desktop.wm.find_slot_by_id(win_id) {
+        Some(s) => s,
+        None => return false,
+    };
+
+    if desktop.wm.bring_to_front(slot) || old_active != desktop.wm.active {
+        if let Some(old_idx) = old_active {
+            if let Some(ref w) = desktop.wm.windows[old_idx] {
+                desktop.mark_dirty(w.bounds_with_shadow());
+            }
+        }
+        if let Some(new_idx) = desktop.wm.active {
+            if let Some(ref w) = desktop.wm.windows[new_idx] {
+                desktop.mark_dirty(w.bounds_with_shadow());
+            }
+        }
+        desktop.request_redraw();
+    }
+
+    true
 }

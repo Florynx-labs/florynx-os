@@ -3,126 +3,159 @@
 </p>
 
 <p align="center">
-  <strong>A bioluminescent desktop OS built from scratch in Rust.</strong>
+  <strong>A bioluminescent desktop OS built from scratch in Rust.</strong><br>
+  <em>KDE Plasma-inspired shell • Double-buffered compositor • Capability security</em>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/arch-x86__64-blue" alt="arch" />
   <img src="https://img.shields.io/badge/lang-Rust%20nightly-orange" alt="lang" />
-  <img src="https://img.shields.io/badge/version-0.2-cyan" alt="version" />
+  <img src="https://img.shields.io/badge/version-0.3.0-cyan" alt="version" />
+  <img src="https://img.shields.io/badge/features-108-brightgreen" alt="features" />
 </p>
 
 ---
 
 ## Overview
 
-FlorynxOS is a modern x86_64 operating system kernel with a graphical desktop shell, written entirely in Rust with no external runtime. It boots from bare metal into a dark, premium GUI with draggable windows, a floating dock, and a mouse cursor — all rendered on a raw framebuffer.
+FlorynxOS is a modern x86_64 operating system with a **KDE Plasma-inspired desktop shell**, written entirely in Rust (`#![no_std]`). It boots from bare metal into a dark bioluminescent GUI with animated windows, a bottom panel with app menu, and a double-buffered compositor — all rendered on a raw framebuffer.
+
+**v0.3.0 "Sentinel"** introduces kernel/userland separation, an animation engine, per-window compositor buffers, capability-based security, and 3 default wallpapers.
 
 ## Architecture
 
 ```
-florynx-kernel/src/
-├── arch/x86_64/       GDT, IDT, PIC, PIT, CPU detection
-├── core/              Kernel core, panic handler, logging macros
-├── drivers/
-│   ├── display/       BGA graphics, framebuffer, VGA text
-│   ├── input/         PS/2 keyboard + mouse (with timeouts)
-│   ├── serial/        UART 16550 debug output
-│   └── timer/         PIT at 100 Hz
-├── memory/            Paging, O(1) frame allocator, heap (1 MiB)
-├── gui/
-│   ├── renderer.rs    Drawing primitives, 8x8 font, cursor
-│   ├── theme.rs       Bioluminescent color palette (PRD)
-│   ├── desktop.rs     Compositor, window manager, cached background
-│   ├── window.rs      Draggable windows with titlebar buttons
-│   ├── dock.rs        Floating bottom dock with icons
-│   ├── icons.rs       16x16 + 8x8 bitmap icons
-│   ├── event.rs       Mouse event dispatch
-│   └── console.rs     Framebuffer text console
-├── process/           Task scheduler (round-robin)
-├── interrupts/        PIC, interrupt dispatch
-├── syscall/           Syscall table
-├── ipc/               Message passing
-├── fs/                VFS stubs
-├── security/          Capability stubs
-└── main.rs            Boot sequence (6 phases)
+florynx-os/
+├── florynx-kernel/          Kernel (Ring 0)
+│   └── src/
+│       ├── arch/x86_64/     GDT, IDT, PIC, PIT, syscall entry
+│       ├── core/            Kernel core, panic, logging
+│       ├── drivers/         Display (double-buffered), input, serial, timer
+│       ├── memory/          Paging, frame alloc, 16 MiB heap
+│       ├── gui/             Animated compositor, 32-rect dirty engine
+│       ├── process/         Scheduler, tasks, context switch
+│       ├── syscall/         Syscall dispatch (11 syscalls)
+│       ├── ipc/             Channels, messages, event bus
+│       ├── fs/              VFS, tmpfs, devfs, ramdisk
+│       └── security/        18 capabilities, audit log
+│
+├── florynx-userland/        Userland (future Ring 3)
+│   ├── src/
+│   │   ├── gui/             KDE Plasma-style desktop shell
+│   │   │   ├── shell.rs     Desktop compositor
+│   │   │   ├── panel.rs     Bottom panel (menu + taskbar + systray)
+│   │   │   ├── app_menu.rs  Kickoff-style app launcher
+│   │   │   ├── taskbar.rs   Window list / task manager
+│   │   │   ├── systray.rs   Clock, indicators
+│   │   │   ├── wallpaper.rs Wallpaper manager (3 defaults)
+│   │   │   └── theme.rs     Breeze Bioluminescent theme
+│   │   ├── apps/            Files, Terminal, Settings, Monitor, Editor
+│   │   └── system/          Session manager, notification daemon
+│   └── assets/
+│       └── wallpapers/      3 default bioluminescent wallpapers
+│
+├── shared/                  Kernel ↔ Userland shared types
+│   └── src/
+│       ├── syscall_abi.rs   Syscall numbers + error codes
+│       └── types.rs         Rect, Color, GuiEvent, WindowParams
+│
+└── docs/                    Architecture docs, evolution log
 ```
+
+## Default Wallpapers
+
+Three bioluminescent wallpapers ship with FlorynxOS:
+
+| # | Name | Description |
+|---|------|-------------|
+| 1 | Bioluminescent Crystals | Green & cyan crystal formations |
+| 2 | Flowing Waves | Abstract teal energy waves |
+| 3 | Nebula | Green-cyan cosmic nebula |
 
 ## Prerequisites
 
 - **Rust nightly** (auto-configured via `rust-toolchain.toml`)
 - **QEMU** (`qemu-system-x86_64`)
-- **bootimage**:
-  ```
-  cargo install bootimage
-  ```
+- **bootimage**: `cargo install bootimage`
 
-## Build
+## Build & Run
 
 ```bash
 cd florynx-kernel
-cargo +nightly build
-```
-
-## Run in QEMU
-
-```bash
 cargo +nightly bootimage
 qemu-system-x86_64 \
   -drive format=raw,file=target/x86_64-florynx/debug/bootimage-florynx-kernel.bin \
-  -serial stdio
+  -serial stdio -m 128
 ```
 
-## Features
+## Features (108 total across 7 phases)
 
 ### Kernel
-- Bootable x86_64 bare-metal kernel
-- GDT with TSS (double-fault IST stack)
-- IDT with exception + hardware IRQ handlers
-- PIC-based interrupts, PIT timer at 100 Hz
-- Virtual memory paging with identity-mapped physical memory
-- O(1) bump frame allocator (region-tracking)
-- Kernel heap — 1 MiB linked-list allocator
-- PS/2 keyboard + mouse with timeout-safe init
-- Serial debug output (UART 16550, COM1)
-- Round-robin task scheduler
+- x86_64 bare-metal, GDT+TSS, IDT with 9 exception handlers
+- PIC interrupts, PIT at 200 Hz
+- 4-level paging, O(1) frame allocator
+- **16 MiB** kernel heap (linked-list allocator)
+- PS/2 keyboard + mouse (timeout-safe)
+- Serial debug (UART 16550, COM1)
+- Round-robin scheduler with task exit()
+- Syscall interface (11 syscalls)
+- VFS + tmpfs + devfs (/dev/null, /dev/zero, /dev/serial0)
+- Ramdisk (4 MiB)
+- **18 capability flags** with enforcement + audit log
 
-### GUI Desktop Shell
+### GUI Compositor
+- **Double-buffered** rendering (RAM back buffer → VRAM flush)
+- **32-rect dirty engine** with merge (no full-screen redraws)
+- **Animation engine**: LERP, ease_out, AnimatedPos/Opacity/Scale
+- **Per-window offscreen buffers** with dirty flag
+- Animated window drag (smooth interpolation)
+- Window fade-in on creation
+- **Dock hover magnification** (1.25× animated scale)
 - BGA framebuffer (1024×768, 32bpp)
-- Dark bioluminescent theme (cyan/mint accents from logo)
-- Gradient background with noise + vignette (cached for performance)
-- Draggable windows with rounded corners and shadow
-- Traffic-light titlebar buttons (close/minimize/maximize)
-- Floating dock with bitmap icons and hover highlight
-- Hardware cursor with dirty-rect save/restore
-- Window manager with z-ordering and focus tracking
-- Mouse event dispatch (click, drag, hover)
+- Cursor: back-buffer draw, flush ~14×20 region only
+
+### KDE Plasma-Style Shell (Userland)
+- Bottom panel: [App Menu] [Taskbar] [System Tray + Clock]
+- Kickoff-style application launcher
+- Task manager with active window highlighting
+- System tray with clock display
+- Wallpaper manager (3 default wallpapers)
+- Breeze Bioluminescent dark theme
+- Notification daemon (top-right popups)
+- Built-in apps: Files, Terminal, Settings, Monitor, Editor
+
+### IPC
+- Bidirectional typed channels
+- Message queue (mailbox pattern)
+- Event bus: pub/sub with 64-entry ring buffers (32 subscriptions)
 
 ## Boot Sequence
 
 ```
-Phase 1  GDT → IDT → PIC + PIT         (interrupts disabled)
-Phase 2  Paging → Frame alloc → Heap
-Phase 3  BGA framebuffer → Console
-Phase 4  Enable interrupts
-Phase 5  Post-init → Desktop launch
-Phase 6  hlt_loop with GUI redraw
+Phase 1  GDT → IDT → PIC + PIT              [arch]
+Phase 2  Paging → Frame alloc → Heap (16 MiB) [memory]
+Phase 3  BGA framebuffer → Console → Mouse    [drivers]
+Phase 4  Enable interrupts                     [arch]
+Phase 5  VFS + DevFS + Scheduler + Syscalls    [services]
+Phase 6  Desktop launch → hlt_loop            [gui]
 ```
 
-### Serial Output
+### Serial Output (v0.3.0)
 ```
-[kernel] core init complete (interrupts still disabled)
-=========================================
-  Florynx Kernel v0.2 — Booting...
-=========================================
-[boot] heap initialized
-[boot] interrupts ENABLED
+[gdt] loaded with kernel segments and TSS
+[idt] loaded with exception and IRQ handlers
+[heap] initialized at 0x444444440000, size 16384 KiB
+[vfs] initialized with 5 directories
+[devfs] initialized: /dev/null, /dev/zero, /dev/serial0
+[syscall] interface initialized (11 syscalls registered)
 [desktop] GUI initialized (1024x768)
-========================================
-  Kernel OK — System stable.
-========================================
-[kernel] entering GUI hlt_loop
 ```
+
+## Documentation
+
+- **[Architecture](docs/architecture.md)** — Full system architecture with Mermaid diagrams
+- **[Evolutions](docs/evolutions.md)** — All 108 features tracked across 7 phases
+- **[Release Notes](RELEASE_v0.3.0.md)** — v0.3.0 "Sentinel" changelog
 
 ## License
 

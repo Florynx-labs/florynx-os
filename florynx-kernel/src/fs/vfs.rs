@@ -88,6 +88,7 @@ pub struct FileDescriptor {
     pub inode: u64,
     pub offset: u64,
     pub flags: OpenFlags,
+    pub owner_task: Option<u64>,
 }
 
 /// File open flags
@@ -186,6 +187,7 @@ impl Vfs {
             inode,
             offset: 0,
             flags,
+            owner_task: crate::process::scheduler::current_task_id().map(|id| id.0),
         };
         
         // Store in open files table
@@ -225,6 +227,20 @@ impl Vfs {
         
         self.open_files[fd] = None;
         Ok(())
+    }
+
+    /// Close all file descriptors owned by the given task.
+    pub fn close_owned_by(&mut self, task_id: u64) -> usize {
+        let mut closed = 0usize;
+        for slot in self.open_files.iter_mut() {
+            if let Some(desc) = slot {
+                if desc.owner_task == Some(task_id) {
+                    *slot = None;
+                    closed += 1;
+                }
+            }
+        }
+        closed
     }
 
     /// Find a node by path
@@ -479,4 +495,10 @@ pub fn init() {
     let vfs = VFS.lock();
     crate::serial_println!("[vfs] initialized with {} directories", 
         vfs.root().children.len());
+}
+
+/// Close all descriptors owned by a task id.
+pub fn close_task_fds(task_id: u64) -> usize {
+    let mut vfs = VFS.lock();
+    vfs.close_owned_by(task_id)
 }

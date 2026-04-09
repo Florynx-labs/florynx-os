@@ -22,6 +22,7 @@ pub struct MouseState {
     pub x: i32,
     pub y: i32,
     pub buttons: u8,
+    prev_buttons: u8,
     cycle: u8,
     packet: [u8; 3],
 }
@@ -32,6 +33,7 @@ impl MouseState {
             x: 400, // Start at center
             y: 300,
             buttons: 0,
+            prev_buttons: 0,
             cycle: 0,
             packet: [0; 3],
         }
@@ -68,6 +70,7 @@ impl MouseState {
 
                 self.x += dx;
                 self.y -= dy; // Invert Y (PS/2 is Y-up, GUI is Y-down)
+                self.prev_buttons = self.buttons;
                 self.buttons = flags & 0x07;
 
                 // Clamping (assumes 1024x768 for now, but we'll dynamic it in the GUI)
@@ -76,13 +79,16 @@ impl MouseState {
                 if self.x > 1023 { self.x = 1023; }
                 if self.y > 767 { self.y = 767; }
 
-                // Trigger lightweight cursor redraw
-                crate::gui::renderer::update_cursor(self.x as usize, self.y as usize);
-
-                // Notify desktop compositor of mouse state (for event dispatch)
-                crate::gui::desktop::on_mouse_update(
-                    self.x as usize, self.y as usize, self.buttons
-                );
+                // Push through central driver event queue.
+                crate::drivers::event::push_event(crate::drivers::event::Event::MouseMove(self.x, self.y));
+                crate::drivers::event::push_event(crate::drivers::event::Event::MouseState {
+                    x: self.x,
+                    y: self.y,
+                    buttons: self.buttons,
+                });
+                if (self.buttons & 1) != 0 && (self.prev_buttons & 1) == 0 {
+                    crate::drivers::event::push_event(crate::drivers::event::Event::Click);
+                }
             }
             _ => self.cycle = 0,
         }

@@ -274,6 +274,23 @@ graph TB
 |  |  Desktop | Windows (per-buf) | Dock (scale) | Animation | Render |  |
 |  +===================================================================+  |
 +==========================================================================+
+|                                                                          |
+|  +=======================================================================+
+|  |                    USERLAND (florynx-userland/)                       |
+|  |  KDE Plasma-Style Shell:                                              |
+|  |    Panel [App Menu | Taskbar | Systray+Clock]                         |
+|  |    Kickoff Launcher | Notifications | Session Manager                 |
+|  |  Apps: Files | Terminal | Settings | Monitor | Editor                  |
+|  |  Theme: Breeze Bioluminescent | Wallpaper Manager (3 defaults)        |
+|  +=======================================================================+
+|                                                                          |
+|  +=======================================================================+
+|  |                    SHARED (shared/)                                    |
+|  |  syscall_abi.rs: SYS_* numbers + GUI/IPC extensions                   |
+|  |  types.rs: Rect, Color, GuiEvent, WindowParams, WinFlags              |
+|  +=======================================================================+
+|                                                                          |
++==========================================================================+
 |                         HARDWARE                                         |
 |  x86_64 CPU | RAM | BGA/VBE | PS/2 | COM1 | [Storage] | [NIC]          |
 +==========================================================================+
@@ -721,10 +738,44 @@ florynx-kernel/src/
 └── main.rs                     ✅ (extend: add Phase 5b)
 ```
 
+### Userland (florynx-userland/)
+```
+florynx-userland/
+├── src/
+│   ├── gui/
+│   │   ├── shell.rs            ✅ KDE Plasma-style desktop compositor
+│   │   ├── panel.rs            ✅ Bottom panel (menu + taskbar + systray)
+│   │   ├── app_menu.rs         ✅ Kickoff-style launcher with categories
+│   │   ├── taskbar.rs          ✅ Window task list with active highlight
+│   │   ├── systray.rs          ✅ System tray with clock
+│   │   ├── wallpaper.rs        ✅ Wallpaper manager (3 defaults)
+│   │   └── theme.rs            ✅ Breeze Bioluminescent palette
+│   ├── apps/
+│   │   ├── files.rs            🟡 Dolphin-style file manager
+│   │   ├── terminal.rs         🟡 Konsole-style terminal
+│   │   ├── settings.rs         🟡 System settings
+│   │   ├── monitor.rs          🟡 System monitor
+│   │   └── editor.rs           🟡 Kate-style text editor
+│   └── system/
+│       ├── session.rs          ✅ Session manager
+│       └── notif.rs            ✅ Notification daemon
+└── assets/
+    └── wallpapers/             ✅ 3 bioluminescent wallpapers
+```
+
+### Shared Types (shared/)
+```
+shared/
+└── src/
+    ├── lib.rs                  ✅ no_std shared crate root
+    ├── syscall_abi.rs          ✅ SYS_* numbers + GUI/IPC extensions
+    └── types.rs                ✅ Rect, Color, GuiEvent, WindowParams
+```
+
 Legend: ✅ = Working | 🟡 = Stub → implement | 🔲 = New file | 🆕 = New subsystem
 
 ---
 
-*Florynx-OS v0.3 'Sentinel' Architecture — April 2026*
-*Double-buffered compositor, capability security, dirty-rect engine.*
+*Florynx-OS v0.3.0 'Sentinel' Architecture — April 2026*
+*Kernel/Userland split • KDE Plasma-style shell • Animation engine • 108 features.*
 *WASM integration inspired by Wasmtime, Redox OS, and Fuchsia Zircon.*

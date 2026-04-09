@@ -6,9 +6,14 @@
 
 use lazy_static::lazy_static;
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
+use core::sync::atomic::{AtomicU64, Ordering};
 
 use crate::arch::x86_64::gdt;
 use crate::interrupts::pic::InterruptIndex;
+
+static PAGE_FAULT_TOTAL: AtomicU64 = AtomicU64::new(0);
+static PAGE_FAULT_USER: AtomicU64 = AtomicU64::new(0);
+static PAGE_FAULT_KERNEL: AtomicU64 = AtomicU64::new(0);
 
 lazy_static! {
     /// The global IDT instance.
@@ -42,7 +47,7 @@ lazy_static! {
 // ... handlers ...
 
 extern "x86-interrupt" fn mouse_interrupt_handler(_stack_frame: InterruptStackFrame) {
-    crate::drivers::input::mouse::handle_interrupt();
+    crate::drivers::handle_mouse_irq();
 
     unsafe {
         crate::interrupts::pic::PICS
@@ -120,24 +125,56 @@ extern "x86-interrupt" fn page_fault_handler(
     error_code: PageFaultErrorCode,
 ) {
     use crate::core_kernel::exception::{ExceptionContext, PageFaultInfo};
+    use x86_64::registers::control::Cr2;
+
+    let fault_addr = Cr2::read().as_u64();
+    PAGE_FAULT_TOTAL.fetch_add(1, Ordering::Relaxed);
+    let is_user_fault = error_code.contains(PageFaultErrorCode::USER_MODE)
+        || ((stack_frame.code_segment & 0x3) == 0x3);
+
+    if is_user_fault {
+        PAGE_FAULT_USER.fetch_add(1, Ordering::Relaxed);
+        crate::serial_println!(
+            "[exception] user page fault: addr=0x{:x} err={:?} rip=0x{:x}",
+            fault_addr,
+            error_code,
+            stack_frame.instruction_pointer.as_u64()
+        );
+        crate::process::scheduler::handle_user_page_fault(fault_addr, error_code.bits() as u64);
+        return;
+    }
+    PAGE_FAULT_KERNEL.fetch_add(1, Ordering::Relaxed);
 
     let ctx = ExceptionContext::new("PAGE FAULT", 14, &stack_frame);
     ctx.dump();
-    
+
     let pf_info = PageFaultInfo::new(error_code);
     pf_info.dump();
 
-    use x86_64::registers::control::Cr2;
-    
     crate::serial_println!(
         "\n[exception] PAGE FAULT - Stack Frame:\n{:#?}",
         stack_frame
     );
     panic!(
-        "PAGE FAULT: addr={:?} error={:?}",
-        Cr2::read(),
+        "PAGE FAULT: addr=0x{:x} error={:?}",
+        fault_addr,
         error_code
     );
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct FaultTelemetry {
+    pub page_fault_total: u64,
+    pub page_fault_user: u64,
+    pub page_fault_kernel: u64,
+}
+
+pub fn fault_telemetry() -> FaultTelemetry {
+    FaultTelemetry {
+        page_fault_total: PAGE_FAULT_TOTAL.load(Ordering::Relaxed),
+        page_fault_user: PAGE_FAULT_USER.load(Ordering::Relaxed),
+        page_fault_kernel: PAGE_FAULT_KERNEL.load(Ordering::Relaxed),
+    }
 }
 
 extern "x86-interrupt" fn general_protection_fault_handler(
@@ -167,8 +204,7 @@ extern "x86-interrupt" fn general_protection_fault_handler(
 // ---------------------------------------------------------------------------
 
 extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFrame) {
-    // Increment the PIT tick counter
-    crate::drivers::timer::pit::tick();
+    crate::drivers::handle_timer_irq();
 
     // Notify the scheduler
     crate::process::scheduler::timer_tick();
@@ -182,7 +218,7 @@ extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFr
 }
 
 extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {
-    crate::drivers::input::keyboard::handle_keyboard_interrupt();
+    crate::drivers::handle_keyboard_irq();
 
     unsafe {
         crate::interrupts::pic::PICS

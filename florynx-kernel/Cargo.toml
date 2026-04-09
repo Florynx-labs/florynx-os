@@ -1,6 +1,6 @@
 [package]
 name = "florynx-kernel"
-version = "0.3.0"
+version = "0.4.5"
 edition = "2021"
 authors = ["Florynx OS Team"]
 description = "Florynx Kernel - Production-level x86_64 OS with GUI, exception handling, and VFS"
@@ -15,6 +15,7 @@ pic8259 = "0.10.4"
 pc-keyboard = "0.7.0"
 linked_list_allocator = "0.9.1"
 lazy_static = { version = "1.5.0", features = ["spin_no_std"] }
+florynx-shared = { path = "../shared" }
 
 [profile.dev]
 panic = "abort"
