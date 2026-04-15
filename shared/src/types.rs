@@ -56,3 +56,14 @@ pub type Pid = u32;
 
 /// Window ID type.
 pub type WinId = u32;
+
+// =============================================================================
+// HGUI Kernel/Userland Link Constants
+// =============================================================================
+
+pub const HGUI_SCREEN_W: u32 = 1024;
+pub const HGUI_SCREEN_H: u32 = 768;
+pub const HGUI_PANEL_HEIGHT: u32 = 40;
+
+pub const HGUI_PANEL_TITLE: &str = "Florynx Panel";
+pub const HGUI_SHELL_TITLE: &str = "Florynx HGUI";

@@ -426,8 +426,8 @@ pub fn draw_circle(fb: &mut FramebufferManager, cx: usize, cy: usize, r: usize, 
 // Cursor (called from mouse IRQ — must be fast, try_lock only)
 // ---------------------------------------------------------------------------
 
-const CURSOR_W: usize = 12;
-const CURSOR_H: usize = 18;
+const CURSOR_W: usize = 14;
+const CURSOR_H: usize = 20;
 
 static CURSOR_STATE: spin::Mutex<CursorBackup> = spin::Mutex::new(CursorBackup::new());
 
@@ -477,15 +477,41 @@ fn restore_under_cursor(fb: &mut FramebufferManager, backup: &CursorBackup) {
 
 fn draw_cursor_shape(fb: &mut FramebufferManager, x: usize, y: usize) {
     // Modern arrow cursor: white fill, black border
-    for i in 0..CURSOR_H.min(12) {
-        let w = (i * 2 / 3).max(1);
-        for dx in 0..w {
-            fb.set_pixel(x + dx + 1, y + i, 255, 255, 255);
+    // Draw a proper arrow shape that fills the 14x20 bounding box
+    let arrow_pixels: [(usize, usize); 20] = [
+        // Arrow head pointing up-left
+        (0, 0), (1, 0), (2, 0),
+        (0, 1), (1, 1), (2, 1), (3, 1),
+        (0, 2), (1, 2), (2, 2), (3, 2), (4, 2),
+        (0, 3), (1, 3), (2, 3), (3, 3), (4, 3), (5, 3),
+        (0, 4), (1, 4),
+    ];
+    
+    // Black outline (border pixels around the arrow)
+    let outline_pixels: [(usize, usize); 15] = [
+        (0, 5), (1, 5), (2, 5), (3, 5), (4, 5), (5, 5), (6, 5),
+        (2, 6), (3, 6), (4, 6), (5, 6), (6, 6), (7, 6),
+        (4, 7), (5, 7),
+    ];
+    
+    // Fill white interior
+    for (dx, dy) in arrow_pixels {
+        if x + dx < fb.width() && y + dy < fb.height() {
+            fb.set_pixel(x + dx, y + dy, 255, 255, 255);
         }
-        fb.set_pixel(x, y + i, 0, 0, 0);
-        fb.set_pixel(x + w + 1, y + i, 0, 0, 0);
     }
-    fb.set_pixel(x, y, 0, 0, 0);
+    
+    // Draw black outline
+    for (dx, dy) in outline_pixels {
+        if x + dx < fb.width() && y + dy < fb.height() {
+            fb.set_pixel(x + dx, y + dy, 0, 0, 0);
+        }
+    }
+    
+    // Corner pixel
+    if x < fb.width() && y < fb.height() {
+        fb.set_pixel(x, y, 0, 0, 0);
+    }
 }
 
 /// Update cursor position — called from mouse IRQ handler.
@@ -508,15 +534,20 @@ pub fn update_cursor(x: usize, y: usize) {
     let old_x = backup.x;
     let old_y = backup.y;
     let was_valid = backup.valid;
+    
+    // Clamp coordinates to screen bounds
+    let new_x = x.min(fb.width().saturating_sub(CURSOR_W));
+    let new_y = y.min(fb.height().saturating_sub(CURSOR_H));
+    
     restore_under_cursor(fb, &backup);
     if was_valid {
-        fb.flush_rect(old_x, old_y, CURSOR_W + 2, CURSOR_H + 2);
+        fb.flush_rect(old_x, old_y, CURSOR_W, CURSOR_H);
     }
 
     // Save new pixels, draw cursor in back buffer, flush new region
-    save_under_cursor(fb, &mut backup, x, y);
-    draw_cursor_shape(fb, x, y);
-    fb.flush_rect(x, y, CURSOR_W + 2, CURSOR_H + 2);
+    save_under_cursor(fb, &mut backup, new_x, new_y);
+    draw_cursor_shape(fb, new_x, new_y);
+    fb.flush_rect(new_x, new_y, CURSOR_W, CURSOR_H);
 }
 
 /// Redraw cursor on an already-locked framebuffer (e.g. after a full desktop redraw).
@@ -526,8 +557,22 @@ pub fn redraw_cursor_on(fb: &mut FramebufferManager, x: usize, y: usize) {
         Some(guard) => guard,
         None => return,
     };
-    // Don't restore old pixels — the framebuffer was just fully redrawn
-    backup.valid = false;
-    save_under_cursor(fb, &mut backup, x, y);
-    draw_cursor_shape(fb, x, y);
+    
+    // First restore the old cursor area to prevent ghost cursors
+    let old_x = backup.x;
+    let old_y = backup.y;
+    if backup.valid {
+        restore_under_cursor(fb, &backup);
+        // No need to flush here - caller handles framebuffer flushing
+    }
+    
+    // Clamp coordinates to screen bounds
+    let new_x = x.min(fb.width().saturating_sub(CURSOR_W));
+    let new_y = y.min(fb.height().saturating_sub(CURSOR_H));
+    
+    // Update backup position and save new pixels
+    backup.x = new_x;
+    backup.y = new_y;
+    save_under_cursor(fb, &mut backup, new_x, new_y);
+    draw_cursor_shape(fb, new_x, new_y);
 }

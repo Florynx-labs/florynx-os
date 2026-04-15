@@ -14,7 +14,7 @@ impl KeyboardDriver {
 
 impl Driver for KeyboardDriver {
     fn init(&mut self) {
-        // PS/2 keyboard is interrupt-driven and requires no explicit init here.
+        crate::drivers::input::keyboard::init_typematic();
     }
 
     fn handle_interrupt(&mut self) {

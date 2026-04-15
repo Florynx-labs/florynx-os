@@ -119,6 +119,17 @@ static USER_DROPPED: AtomicU64 = AtomicU64::new(0);
 
 pub fn push_mouse_state(x: usize, y: usize, buttons: u8) {
     if let Some(mut q) = INPUT_QUEUE.try_lock() {
+        // Coalesce: if the last event is already a MouseState, overwrite it in-place
+        // rather than appending. This keeps only the latest position during fast moves.
+        let prev = if q.tail == 0 { QUEUE_SIZE - 1 } else { q.tail - 1 };
+        if !q.is_empty() {
+            if let Some(GuiInputEvent::MouseState { x: ref mut ex, y: ref mut ey, buttons: ref mut eb }) = q.events[prev] {
+                *ex = x;
+                *ey = y;
+                *eb = buttons;
+                return;
+            }
+        }
         q.push(GuiInputEvent::MouseState { x, y, buttons });
     } else {
         INPUT_DROPPED.fetch_add(1, Ordering::Relaxed);
@@ -135,6 +146,12 @@ pub fn push_key_press(key: Key) {
 
 pub fn pop_event() -> Option<GuiInputEvent> {
     let mut q = INPUT_QUEUE.lock();
+    q.pop()
+}
+
+/// Non-blocking pop — safe to call from ISR context (uses try_lock).
+pub fn try_pop_event() -> Option<GuiInputEvent> {
+    let mut q = INPUT_QUEUE.try_lock()?;
     q.pop()
 }
 

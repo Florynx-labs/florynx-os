@@ -6,7 +6,7 @@
 **Codename**: "Sentinel"  
 **Features**: 108 across 7 phases
 
----
+--- 
 
 ## What's New in v0.3.0
 

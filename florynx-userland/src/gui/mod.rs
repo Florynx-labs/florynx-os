@@ -13,3 +13,4 @@ pub mod taskbar;
 pub mod systray;
 pub mod wallpaper;
 pub mod theme;
+pub mod ui;

@@ -17,8 +17,12 @@ use super::app_menu::AppMenu;
 use super::taskbar::Taskbar;
 use super::systray::SystemTray;
 use super::api::{self, GuiEventV1};
-use super::wallpaper::{WallpaperManager, WallpaperMode};
-use super::theme;
+use super::wallpaper::WallpaperManager;
+use super::ui;
+use super::ui::widget::Widget;
+use super::ui::widgets::{Button, Container, ContainerKind, Input, Text};
+use florynx_shared::types::{HGUI_PANEL_TITLE, HGUI_SCREEN_W};
+use alloc::boxed::Box;
 
 /// Desktop shell state — the top-level userland GUI manager.
 pub struct DesktopShell {
@@ -36,6 +40,7 @@ pub struct DesktopShell {
     pub needs_redraw: bool,
     pub last_mouse_buttons: u8,
     pub panel_window_id: Option<u32>,
+    pub ui_runtime: Option<ui::UiRuntime>,
 }
 
 impl DesktopShell {
@@ -59,7 +64,27 @@ impl DesktopShell {
             needs_redraw: true,
             last_mouse_buttons: 0,
             panel_window_id: None,
+            ui_runtime: None,
         }
+    }
+
+    fn build_mvp_widget_tree() -> Box<dyn Widget> {
+        let mut root = Container::new(1, ContainerKind::Column);
+        root.gap = 10;
+
+        let title = Text::new(2, "Florynx UI Toolkit MVP");
+        let input = Input::new(3, "Type here...");
+
+        let mut actions = Container::new(4, ContainerKind::Row);
+        actions.gap = 8;
+        actions.push(Box::new(Button::new(5, "Launch")));
+        actions.push(Box::new(Button::new(6, "Settings")));
+
+        root.push(Box::new(title));
+        root.push(Box::new(input));
+        root.push(Box::new(actions));
+
+        Box::new(root)
     }
 
     /// Handle click on the panel.
@@ -174,9 +199,29 @@ impl DesktopShell {
                         self.on_panel_click(x as usize, y as usize);
                     }
                     self.last_mouse_buttons = buttons;
+                    if let Some(runtime) = self.ui_runtime.as_mut() {
+                        if win_id == runtime.window_id {
+                            if let Some(event) = ui::UiRuntime::map_kernel_event(
+                                GuiEventV1::MouseState { win_id, x, y, buttons },
+                            ) {
+                                let _ = runtime.handle_event(event);
+                                self.needs_redraw = true;
+                            }
+                        }
+                    }
                 }
-                GuiEventV1::KeyPress { .. } => {
+                GuiEventV1::KeyPress { win_id, code } => {
                     // Reserved for shell shortcuts in later iterations.
+                    if let Some(runtime) = self.ui_runtime.as_mut() {
+                        if win_id == runtime.window_id {
+                            if let Some(event) = ui::UiRuntime::map_kernel_event(
+                                GuiEventV1::KeyPress { win_id, code },
+                            ) {
+                                let _ = runtime.handle_event(event);
+                                self.needs_redraw = true;
+                            }
+                        }
+                    }
                 }
                 GuiEventV1::WindowCreated { win_id } => {
                     if Some(win_id) != self.panel_window_id {
@@ -205,9 +250,28 @@ impl DesktopShell {
             return None;
         }
         let win_id = id as u32;
-        let _ = api::draw_rect(win_id, 0, 0, self.screen_w as u32, self.panel.height as u32, 0x1D222D);
-        let _ = api::draw_text(win_id, "Florynx Panel");
+        let _ = api::draw_rect(
+            win_id,
+            0,
+            0,
+            self.screen_w.min(HGUI_SCREEN_W as usize) as u32,
+            self.panel.height as u32,
+            0x1D222D,
+        );
+        let _ = api::draw_text(win_id, HGUI_PANEL_TITLE);
         let _ = api::invalidate(win_id);
+        let root = Self::build_mvp_widget_tree();
+        let mut runtime = ui::UiRuntime::new(
+            win_id,
+            root,
+            ui::Size {
+                w: self.screen_w as i32,
+                h: self.panel.height as i32,
+            },
+        );
+        runtime.layout();
+        runtime.render();
+        self.ui_runtime = Some(runtime);
         self.panel_window_id = Some(win_id);
         Some(win_id)
     }
@@ -221,9 +285,20 @@ impl DesktopShell {
         let rc = api::destroy_window(panel_id);
         if rc >= 0 {
             self.panel_window_id = None;
+            self.ui_runtime = None;
             true
         } else {
             false
+        }
+    }
+
+    /// Frame tick for retained-mode userland UI.
+    pub fn tick_ui_frame(&mut self, dt_ms: u32) {
+        if let Some(runtime) = self.ui_runtime.as_mut() {
+            runtime.tick_animations(dt_ms);
+            runtime.layout();
+            runtime.render();
+            self.needs_redraw = false;
         }
     }
 }

@@ -213,13 +213,51 @@ pub fn sys_wait(out_ptr: u64, flags: u64, _arg3: u64) -> i64 {
     }
 }
 
-/// sys_kill — mark a task as zombie.
-/// arg1=pid, arg2=exit_code
-pub fn sys_kill(pid: u64, code: u64, _arg3: u64) -> i64 {
-    if scheduler::kill(crate::process::task::TaskId(pid), code) {
+/// sys_kill — send a signal to a task.
+/// arg1=pid, arg2=signum (SIGKILL=9, SIGTERM=15, etc.)
+pub fn sys_kill(pid: u64, signum: u64, _arg3: u64) -> i64 {
+    use crate::process::signal;
+    if signum > signal::SIGMAX as u64 {
+        return EINVAL;
+    }
+    if signum == 0 {
+        // Signal 0: existence check only.
+        return if scheduler::kill(crate::process::task::TaskId(pid), 0) { 0 } else { ESRCH };
+    }
+    if scheduler::send_signal(crate::process::task::TaskId(pid), signum as u32) {
         0
     } else {
         ESRCH
+    }
+}
+
+/// sys_waitpid — wait for a specific child task.
+/// arg1=pid, arg2=out_ptr (&u64 exit_code), arg3=flags (bit0=WNOHANG)
+pub fn sys_waitpid(pid: u64, out_ptr: u64, flags: u64) -> i64 {
+    const WNOHANG: u64 = 1;
+    let child_id = crate::process::task::TaskId(pid);
+    loop {
+        match scheduler::wait_child_pid(child_id) {
+            Some(code) => {
+                if out_ptr != 0 {
+                    let bytes = code.to_ne_bytes();
+                    if let Err(e) = usermem::copy_to_user(out_ptr, &bytes) {
+                        return e;
+                    }
+                }
+                return pid as i64;
+            }
+            None => {
+                if (flags & WNOHANG) != 0 {
+                    return EAGAIN;
+                }
+                // Child exists but not yet dead — yield and retry.
+                if !scheduler::has_any_child() {
+                    return ECHILD;
+                }
+                scheduler::sleep_current(1);
+            }
+        }
     }
 }
 
@@ -433,4 +471,45 @@ pub fn sys_gui_destroy_window(_win_id: u64, _arg2: u64, _arg3: u64) -> i64 {
 /// SYS_GUI_SET_WALLPAPER (not implemented yet)
 pub fn sys_gui_set_wallpaper(_path_ptr: u64, _path_len: u64, _arg3: u64) -> i64 {
     ENOSYS
+}
+
+/// SYS_CLOCK_GETTIME
+/// clockid=0 → CLOCK_REALTIME  (RTC-based wall clock, seconds since epoch)
+/// clockid=1 → CLOCK_MONOTONIC (PIT uptime, nanosecond precision via ticks)
+/// Writes two u64 values to buf_ptr: [seconds, nanoseconds]
+pub fn sys_clock_gettime(clockid: u64, buf_ptr: u64, _arg3: u64) -> i64 {
+    let (secs, nanos): (u64, u64) = match clockid {
+        0 => {
+            let unix = crate::time::rtc::now_unix();
+            let ticks = crate::drivers::timer::pit::get_ticks();
+            let sub_sec_nanos = ((ticks % 200) * 1_000_000_000) / 200;
+            (unix, sub_sec_nanos)
+        }
+        1 => {
+            let ticks = crate::drivers::timer::pit::get_ticks();
+            let secs = ticks / 200;
+            let nanos = ((ticks % 200) * 1_000_000_000) / 200;
+            (secs, nanos)
+        }
+        _ => return EINVAL,
+    };
+
+    let bytes_s = secs.to_ne_bytes();
+    let bytes_n = nanos.to_ne_bytes();
+    if let Err(e) = usermem::copy_to_user(buf_ptr, &bytes_s) { return e; }
+    if let Err(e) = usermem::copy_to_user(buf_ptr + 8, &bytes_n) { return e; }
+    0
+}
+
+/// sys_fork — clone the current process.
+/// Returns child TaskId (> 0) in parent; child sees 0 in rax via initial_rax.
+pub fn sys_fork() -> i64 {
+    crate::process::fork::sys_fork()
+}
+
+/// sys_execve — replace current process image with a binary from the VFS.
+/// arg1 = user pointer to null-terminated path string.
+/// arg2/arg3 = argv/envp pointers (ignored in this implementation).
+pub fn sys_execve(path_ptr: u64, argv: u64, envp: u64) -> i64 {
+    crate::process::exec::sys_execve(path_ptr, argv, envp)
 }

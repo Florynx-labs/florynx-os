@@ -4,6 +4,7 @@
 
 use alloc::string::String;
 use alloc::vec::Vec;
+use alloc::boxed::Box;
 use spin::Mutex;
 use lazy_static::lazy_static;
 
@@ -131,7 +132,36 @@ pub enum VfsError {
     TooManyOpenFiles,
     InvalidFileDescriptor,
     EndOfFile,
+    IoError,
 }
+
+// ---------------------------------------------------------------------------
+// FsBackend trait — pluggable filesystem backends (FAT32, ext2, …)
+// ---------------------------------------------------------------------------
+
+/// A directory entry returned by `FsBackend::list_dir`.
+#[derive(Debug, Clone)]
+pub struct DirEntry {
+    pub name: String,
+    pub file_type: FileType,
+    pub size: u64,
+}
+
+/// Trait implemented by read-only filesystem backends.
+pub trait FsBackend: Send {
+    fn list_dir(&self, path: &str) -> VfsResult<Vec<DirEntry>>;
+    fn read_file(&self, path: &str) -> VfsResult<Vec<u8>>;
+    /// Returns a partial FileStat (inode=0, permissions=read_only for backends).
+    fn stat(&self, path: &str) -> VfsResult<FileStat>;
+}
+
+/// A wrapper that pairs a mount-point path with its backend.
+pub struct MountedBackend {
+    pub mountpoint: String,
+    backend: Box<dyn FsBackend>,
+}
+
+unsafe impl Send for MountedBackend {}
 
 pub type VfsResult<T> = Result<T, VfsError>;
 
@@ -141,6 +171,8 @@ pub struct Vfs {
     next_inode: u64,
     next_fd: usize,
     open_files: Vec<Option<FileDescriptor>>,
+    /// Pluggable filesystem backends keyed by mount-point path.
+    pub backends: Vec<MountedBackend>,
 }
 
 impl Vfs {
@@ -159,6 +191,7 @@ impl Vfs {
             next_inode: 6,
             next_fd: 3, // 0, 1, 2 reserved for stdin, stdout, stderr
             open_files: Vec::new(),
+            backends: Vec::new(),
         }
     }
 
@@ -169,6 +202,76 @@ impl Vfs {
     pub fn root_mut(&mut self) -> &mut VfsNode {
         &mut self.root
     }
+
+    // -----------------------------------------------------------------------
+    // Backend / mount-point API
+    // -----------------------------------------------------------------------
+
+    /// Mount a filesystem backend at `mountpoint` (e.g. "/disk").
+    /// Creates the mount-point directory in the VFS tree if it doesn't exist.
+    pub fn mount_backend(&mut self, mountpoint: &str, backend: Box<dyn FsBackend>) {
+        // Ensure the mount-point directory exists in the in-memory tree.
+        let name = mountpoint.trim_start_matches('/');
+        if !name.is_empty() {
+            let inode = self.next_inode;
+            self.next_inode += 1;
+            // Only add if not already present.
+            if self.root.find_child(name).is_none() {
+                self.root.add_child(VfsNode::new_directory(name, inode));
+            }
+        }
+        self.backends.push(MountedBackend {
+            mountpoint: String::from(mountpoint),
+            backend,
+        });
+        crate::serial_println!("[vfs] mounted backend at '{}'", mountpoint);
+    }
+
+    /// Find the backend responsible for `path`, and return the relative sub-path.
+    fn backend_for<'a>(&'a self, path: &'a str) -> Option<(&'a dyn FsBackend, &'a str)> {
+        // Find the longest matching mountpoint prefix.
+        let mut best: Option<(&MountedBackend, &str)> = None;
+        for mb in &self.backends {
+            let mp = mb.mountpoint.as_str();
+            if path.starts_with(mp) {
+                let rest = &path[mp.len()..];
+                let rest = rest.trim_start_matches('/');
+                let is_longer = best.as_ref().map(|(b, _)| b.mountpoint.len() < mp.len()).unwrap_or(true);
+                if is_longer {
+                    best = Some((mb, rest));
+                }
+            }
+        }
+        best.map(|(mb, rest)| (mb.backend.as_ref(), rest))
+    }
+
+    /// List directory entries through a mounted backend.
+    pub fn list_dir_backend(&self, path: &str) -> VfsResult<Vec<DirEntry>> {
+        match self.backend_for(path) {
+            Some((backend, sub)) => backend.list_dir(if sub.is_empty() { "/" } else { sub }),
+            None => Err(VfsError::NotFound),
+        }
+    }
+
+    /// Read a file's complete contents through a mounted backend.
+    pub fn read_file_backend(&self, path: &str) -> VfsResult<Vec<u8>> {
+        match self.backend_for(path) {
+            Some((backend, sub)) => backend.read_file(sub),
+            None => Err(VfsError::NotFound),
+        }
+    }
+
+    /// Stat a path through a mounted backend.
+    pub fn stat_backend(&self, path: &str) -> VfsResult<FileStat> {
+        match self.backend_for(path) {
+            Some((backend, sub)) => backend.stat(if sub.is_empty() { "/" } else { sub }),
+            None => Err(VfsError::NotFound),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Core VFS operations
+    // -----------------------------------------------------------------------
 
     /// Allocate a new inode ID
     pub fn alloc_inode(&mut self) -> u64 {

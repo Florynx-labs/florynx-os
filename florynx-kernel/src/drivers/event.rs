@@ -102,6 +102,13 @@ pub fn pop_event() -> Option<TimedEvent> {
     q.pop()
 }
 
+/// Non-blocking pop — safe to call from IRQ context (uses try_lock).
+#[inline]
+pub fn try_pop_event() -> Option<TimedEvent> {
+    let mut q = DRIVER_EVENTS.try_lock()?;
+    q.pop()
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct EventQueueTelemetry {
     pub pushed: u64,

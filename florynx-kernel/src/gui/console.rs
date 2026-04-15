@@ -8,9 +8,12 @@
 // =============================================================================
 
 use core::fmt;
+use core::sync::atomic::{AtomicBool, Ordering};
 use spin::Mutex;
 use crate::drivers::display::framebuffer::{FRAMEBUFFER, FramebufferManager};
 use crate::gui::renderer::{FONT, FONT_W, FONT_H};
+
+static FB_CONSOLE_ACTIVE: AtomicBool = AtomicBool::new(true);
 
 // ---------------------------------------------------------------------------
 // Font configuration (uses shared font from renderer)
@@ -155,9 +158,17 @@ pub fn init() {
     }
 }
 
+/// Disable framebuffer console output (call when desktop takes ownership).
+pub fn disable() {
+    FB_CONSOLE_ACTIVE.store(false, Ordering::Relaxed);
+}
+
 /// Write a formatted string to the framebuffer console.
 /// Safe to call from anywhere (acquires locks internally, skips if contended).
 pub fn _print(args: fmt::Arguments) {
+    if !FB_CONSOLE_ACTIVE.load(Ordering::Relaxed) {
+        return;
+    }
     use core::fmt::Write;
 
     // Acquire FB lock first, then console lock

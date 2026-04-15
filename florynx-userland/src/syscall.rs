@@ -9,14 +9,12 @@ pub fn syscall3(nr: u64, arg1: u64, arg2: u64, arg3: u64) -> i64 {
         let ret: i64;
         unsafe {
             core::arch::asm!(
-                "syscall",
+                "int 0x80",
                 in("rax") nr,
                 in("rdi") arg1,
                 in("rsi") arg2,
                 in("rdx") arg3,
                 lateout("rax") ret,
-                lateout("rcx") _,
-                lateout("r11") _,
                 options(nostack)
             );
         }

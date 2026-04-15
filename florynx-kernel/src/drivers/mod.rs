@@ -14,6 +14,8 @@ pub mod event;
 pub mod keyboard;
 pub mod mouse;
 pub mod disk;
+pub mod block;
+pub mod pci;
 
 use lazy_static::lazy_static;
 use spin::Mutex;
@@ -109,6 +111,45 @@ pub fn process_events() {
             Event::Click => {
                 // Click is represented in MouseState with buttons in current pipeline.
             }
+        }
+    }
+}
+
+/// Non-blocking variant of `process_events` — safe to call from timer ISR.
+/// Uses try_lock to avoid deadlock if the main loop holds the event queue lock.
+pub fn try_process_events() {
+    use crate::drivers::event::{try_pop_event, Event};
+    use crate::gui::event::Key;
+
+    // Drain up to 32 events per call to keep ISR time bounded.
+    for _ in 0..32 {
+        let ev = match try_pop_event() {
+            Some(e) => e,
+            None => break,
+        };
+
+        match ev.event {
+            Event::KeyPress(c) => {
+                let key = match c {
+                    '\x08' => Key::Backspace,
+                    '\n' | '\r' => Key::Enter,
+                    '\t' => Key::Tab,
+                    '\x1b' => Key::Escape,
+                    ch => Key::Char(ch),
+                };
+                crate::gui::event_bus::push_key_press(key);
+            }
+            Event::MouseState { x, y, buttons } => {
+                if x >= 0 && y >= 0 {
+                    crate::gui::event_bus::push_mouse_state(x as usize, y as usize, buttons);
+                }
+            }
+            Event::MouseMove(x, y) => {
+                if x >= 0 && y >= 0 {
+                    crate::gui::event_bus::push_mouse_state(x as usize, y as usize, 0);
+                }
+            }
+            Event::Click => {}
         }
     }
 }

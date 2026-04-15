@@ -9,12 +9,16 @@ use core::sync::atomic::{AtomicU64, Ordering};
 /// Boot timestamp (seconds since Unix epoch, set during init).
 static BOOT_TIMESTAMP: AtomicU64 = AtomicU64::new(0);
 
-/// Initialize the clock subsystem.
+/// Initialize the clock subsystem (reads RTC for real wall-clock time).
 pub fn init() {
-    // In a real kernel, we'd read the RTC to get wall-clock time.
-    // For now, we just mark boot time as 0.
-    BOOT_TIMESTAMP.store(0, Ordering::Relaxed);
-    crate::serial_println!("[clock] initialized");
+    crate::time::rtc::init();
+    BOOT_TIMESTAMP.store(crate::time::rtc::boot_epoch(), Ordering::Relaxed);
+    crate::serial_println!("[clock] initialized (wall-clock from RTC)");
+}
+
+/// Get the current Unix timestamp (wall-clock seconds since 1970-01-01).
+pub fn now_unix() -> u64 {
+    crate::time::rtc::now_unix()
 }
 
 /// Get the system uptime in seconds.

@@ -17,6 +17,17 @@ pub const SYS_EXIT: u64 = 60;
 pub const SYS_WAIT: u64 = 61;
 /// Send signal/terminate process.
 pub const SYS_KILL: u64 = 62;
+/// Wait for a specific child PID.
+/// arg1=pid, arg2=out_ptr ([exit_code:u64]), arg3=flags (bit0=WNOHANG)
+pub const SYS_WAITPID: u64 = 7;
+
+/// Clone the current process (fork).
+/// Returns child task-ID in parent, 0 in child.
+pub const SYS_FORK: u64 = 57;
+
+/// Replace process image with a new binary.
+/// arg1 = path ptr (null-terminated), arg2/arg3 = argv/envp (ignored for now).
+pub const SYS_EXECVE: u64 = 59;
 
 /// Yield the CPU to the scheduler.
 pub const SYS_YIELD: u64 = 24;
@@ -44,6 +55,11 @@ pub const SYS_MKDIR: u64 = 83;
 
 /// Get file statistics.
 pub const SYS_STAT: u64 = 4;
+
+/// Get current time (POSIX clock_gettime equivalent).
+/// arg1 = clockid (0=CLOCK_REALTIME, 1=CLOCK_MONOTONIC)
+/// arg2 = pointer to [u64; 2] buffer → [seconds, nanoseconds]
+pub const SYS_CLOCK_GETTIME: u64 = 228;
 
 /// GUI extension syscalls.
 pub const SYS_GUI_CREATE_WINDOW: u64 = 0x1000;

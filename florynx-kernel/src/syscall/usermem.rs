@@ -138,6 +138,23 @@ fn validate_single_page(
     Ok(())
 }
 
+/// Read a null-terminated C string from user space (up to `max_len` bytes).
+/// Returns `Err(EFAULT)` if the pointer is invalid, `Err(EINVAL)` if no NUL
+/// found within `max_len`.
+pub fn read_cstr_from_user(ptr: u64, max_len: usize) -> Result<alloc::string::String, i64> {
+    if ptr == 0 { return Err(EFAULT); }
+    if ptr > USER_MAX_VADDR { return Err(EFAULT); }
+    let mut result = alloc::string::String::new();
+    for i in 0..max_len {
+        let addr = ptr.checked_add(i as u64).ok_or(EFAULT)?;
+        if addr > USER_MAX_VADDR { return Err(EFAULT); }
+        let byte = unsafe { *(addr as *const u8) };
+        if byte == 0 { return Ok(result); }
+        result.push(byte as char);
+    }
+    Err(EINVAL) // no NUL found within max_len
+}
+
 unsafe fn page_table_from_phys(phys_addr: u64, phys_offset: u64) -> &'static PageTable {
     let virt = VirtAddr::new(phys_offset + phys_addr);
     &*(virt.as_u64() as *const PageTable)

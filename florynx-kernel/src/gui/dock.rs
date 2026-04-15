@@ -17,11 +17,15 @@ const HOVER_SCALE: f32 = 1.25;
 const NORMAL_SCALE: f32 = 1.0;
 const SCALE_SPEED: f32 = 0.18;
 
+const MAX_ITEM_NAME: usize = 16;
+
 #[derive(Clone, Copy)]
 pub struct DockItem {
     pub color: Color,
     pub icon: &'static Icon,
     pub active: bool,
+    name: [u8; MAX_ITEM_NAME],
+    name_len: usize,
 }
 
 pub struct Dock {
@@ -42,8 +46,15 @@ impl Dock {
     }
 
     pub fn add(&mut self, icon: &'static Icon, color: Color) {
+        self.add_named(icon, color, "");
+    }
+
+    pub fn add_named(&mut self, icon: &'static Icon, color: Color, label: &str) {
         if self.count < MAX_ITEMS {
-            self.items[self.count] = Some(DockItem { color, icon, active: false });
+            let mut name = [0u8; MAX_ITEM_NAME];
+            let len = label.len().min(MAX_ITEM_NAME);
+            name[..len].copy_from_slice(&label.as_bytes()[..len]);
+            self.items[self.count] = Some(DockItem { color, icon, active: false, name, name_len: len });
             self.count += 1;
         }
     }
@@ -106,6 +117,25 @@ impl Dock {
                     let dot_x = sx + scaled_size / 2;
                     let dot_y = sy + scaled_size + 4;
                     renderer::draw_circle(fb, dot_x, dot_y, 2, t.accent);
+                }
+            }
+        }
+
+        // Draw tooltip above hovered icon
+        if let Some(hi) = self.hovered {
+            if let Some(item) = &self.items[hi] {
+                if item.name_len > 0 {
+                    let ir = self.icon_rect(hi, screen_w, screen_h);
+                    let label = core::str::from_utf8(&item.name[..item.name_len]).unwrap_or("");
+                    let text_w = label.len() * 8;
+                    let pad = 8;
+                    let tw = text_w + pad * 2;
+                    let th = 20;
+                    let tx = (ir.x + ICON_SIZE / 2).saturating_sub(tw / 2);
+                    let ty = ir.y.saturating_sub(th + 6);
+                    renderer::draw_rounded_rect(fb, tx, ty, tw, th, 6, t.tooltip_bg);
+                    renderer::draw_rounded_border(fb, tx, ty, tw, th, 6, t.border);
+                    renderer::draw_text(fb, label, tx + pad, ty + (th.saturating_sub(8)) / 2, t.tooltip_text, 1);
                 }
             }
         }

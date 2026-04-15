@@ -21,6 +21,27 @@ lazy_static! {
     );
 }
 
+/// Initialize PS/2 keyboard: set fastest typematic rate (250 ms delay, 30 cps).
+pub fn init_typematic() {
+    let mut status_port: Port<u8> = Port::new(0x64);
+    let mut data_port:   Port<u8> = Port::new(0x60);
+    unsafe {
+        // Wait for input buffer empty, then send 0xF3 (Set Typematic Rate/Delay)
+        for _ in 0..100_000u32 { if status_port.read() & 0x02 == 0 { break; } }
+        data_port.write(0xF3u8);
+        // Wait for ACK
+        for _ in 0..100_000u32 { if status_port.read() & 0x01 != 0 { break; } }
+        let _ = data_port.read();
+        // Wait for input buffer empty, then send rate byte 0x00 = 250ms / 30 cps
+        for _ in 0..100_000u32 { if status_port.read() & 0x02 == 0 { break; } }
+        data_port.write(0x00u8);
+        // Wait for ACK
+        for _ in 0..100_000u32 { if status_port.read() & 0x01 != 0 { break; } }
+        let _ = data_port.read();
+    }
+    crate::serial_println!("[keyboard] typematic rate set: 250ms delay, 30 cps");
+}
+
 /// Called by the keyboard interrupt handler (IRQ1).
 /// Reads the scancode from port 0x60 and decodes it.
 pub fn handle_keyboard_interrupt() {
@@ -73,7 +94,9 @@ pub fn handle_keyboard_interrupt() {
                 }
             };
 
-            // Push into central driver event queue (IRQ path stays minimal).
+            // Route keys: char-type keys through the driver event queue (for
+            // latency telemetry); special keys go directly to the GUI event bus
+            // because the driver event queue only carries char-encoded events.
             match gui_key {
                 crate::gui::event::Key::Char(c) => {
                     crate::drivers::event::push_event(crate::drivers::event::Event::KeyPress(c));
@@ -90,9 +113,10 @@ pub fn handle_keyboard_interrupt() {
                 crate::gui::event::Key::Escape => {
                     crate::drivers::event::push_event(crate::drivers::event::Event::KeyPress('\x1b'));
                 }
-                _ => {
-                    // Non-character keys are intentionally ignored by the
-                    // low-level generic event queue in this phase.
+                special => {
+                    // Arrow keys, Delete, Home, End, PageUp, PageDown bypass the
+                    // driver event queue and go directly to the GUI input bus.
+                    crate::gui::event_bus::push_key_press(special);
                 }
             }
         }

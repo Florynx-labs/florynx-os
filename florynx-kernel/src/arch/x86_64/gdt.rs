@@ -15,11 +15,20 @@ pub const DOUBLE_FAULT_IST_INDEX: u16 = 0;
 
 /// Size of the double-fault handler stack (20 KiB).
 const STACK_SIZE: usize = 4096 * 5;
+/// Ring0 privilege stack used when entering kernel from Ring3.
+const PRIVILEGE_STACK_INDEX: usize = 0;
 
 lazy_static! {
     /// Task State Segment with a dedicated double-fault stack.
     static ref TSS: TaskStateSegment = {
         let mut tss = TaskStateSegment::new();
+        // Required for CPL3->CPL0 transitions (e.g. int 0x80 from user mode).
+        tss.privilege_stack_table[PRIVILEGE_STACK_INDEX] = {
+            static mut PRIV_STACK: [u8; STACK_SIZE] = [0; STACK_SIZE];
+            let stack_start = VirtAddr::from_ptr(&raw const PRIV_STACK);
+            let stack_end = stack_start + STACK_SIZE;
+            stack_end
+        };
         tss.interrupt_stack_table[DOUBLE_FAULT_IST_INDEX as usize] = {
             static mut STACK: [u8; STACK_SIZE] = [0; STACK_SIZE];
             let stack_start = VirtAddr::from_ptr(&raw const STACK);
@@ -76,5 +85,9 @@ pub fn init() {
         load_tss(GDT.1.tss_selector);
     }
 
-    crate::serial_println!("[gdt] loaded with kernel segments and TSS");
+    crate::serial_println!("[gdt] loaded with kernel segments, TSS, and RSP0 stack");
+
+    // Enable SSE and FPU now that segments are valid. Must happen before any
+    // Rust-generated SSE instruction (common in optimized alloc/copy code).
+    crate::arch::x86_64::cpu::enable_sse();
 }

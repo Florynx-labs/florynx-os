@@ -30,6 +30,10 @@ pub struct Theme {
     pub shadow_offset: usize,
     pub shadow_layers: usize,
     pub padding: usize,
+    pub menubar_h: usize,
+    pub menubar_bg: Color,
+    pub tooltip_bg: Color,
+    pub tooltip_text: Color,
 }
 
 pub static DARK: Theme = Theme {
@@ -57,4 +61,8 @@ pub static DARK: Theme = Theme {
     shadow_offset:   4,
     shadow_layers:   3,
     padding:         14,
+    menubar_h:       28,
+    menubar_bg:      Color::rgba(13, 17, 23, 220),   // semi-transparent dark
+    tooltip_bg:      Color::rgb(34, 44, 58),          // #222C3A
+    tooltip_text:    Color::rgb(243, 247, 250),       // #F3F7FA
 };

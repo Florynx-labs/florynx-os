@@ -18,6 +18,9 @@ lazy_static! {
     pub static ref MOUSE: Mutex<MouseState> = Mutex::new(MouseState::new());
 }
 
+/// Maximum consecutive errors before forcing resync
+const MAX_SYNC_ERRORS: u8 = 8;
+
 pub struct MouseState {
     pub x: i32,
     pub y: i32,
@@ -25,6 +28,7 @@ pub struct MouseState {
     prev_buttons: u8,
     cycle: u8,
     packet: [u8; 3],
+    sync_errors: u8,  // Counter for consecutive sync failures
 }
 
 impl MouseState {
@@ -36,7 +40,14 @@ impl MouseState {
             prev_buttons: 0,
             cycle: 0,
             packet: [0; 3],
+            sync_errors: 0,
         }
+    }
+
+    /// Force resynchronization - call when we detect we're out of sync
+    fn resync(&mut self) {
+        self.cycle = 0;
+        self.sync_errors = 0;
     }
 
     /// Process a byte from the PS/2 controller.
@@ -47,6 +58,14 @@ impl MouseState {
                 if data & 0x08 != 0 {
                     self.packet[0] = data;
                     self.cycle = 1;
+                    self.sync_errors = 0;  // Reset error counter on valid packet start
+                } else {
+                    // Invalid byte - increment error counter
+                    self.sync_errors += 1;
+                    if self.sync_errors >= MAX_SYNC_ERRORS {
+                        // Force resync after too many errors
+                        self.resync();
+                    }
                 }
             }
             1 => {
@@ -59,14 +78,24 @@ impl MouseState {
                 self.packet[2] = data;
                 self.cycle = 0;
 
-                // Finished packet: Update state
+                // Validate the packet - check for overflow bits
                 let flags = self.packet[0];
+                
+                // If overflow bits are set, the movement was too large - clamp it
+                let x_overflow = flags & 0x40 != 0;
+                let y_overflow = flags & 0x80 != 0;
+
+                // Finished packet: Update state
                 let mut dx = self.packet[1] as i32;
                 let mut dy = self.packet[2] as i32;
 
                 // Sign extension for 9-bit deltas
                 if flags & 0x10 != 0 { dx |= !0xFF; }
                 if flags & 0x20 != 0 { dy |= !0xFF; }
+                
+                // Clamp on overflow
+                if x_overflow { dx = if dx < 0 { -255 } else { 255 }; }
+                if y_overflow { dy = if dy < 0 { -255 } else { 255 }; }
 
                 self.x += dx;
                 self.y -= dy; // Invert Y (PS/2 is Y-up, GUI is Y-down)
@@ -79,8 +108,7 @@ impl MouseState {
                 if self.x > 1023 { self.x = 1023; }
                 if self.y > 767 { self.y = 767; }
 
-                // Push through central driver event queue.
-                crate::drivers::event::push_event(crate::drivers::event::Event::MouseMove(self.x, self.y));
+                // Push a single MouseState event — position + buttons in one shot.
                 crate::drivers::event::push_event(crate::drivers::event::Event::MouseState {
                     x: self.x,
                     y: self.y,
@@ -90,7 +118,7 @@ impl MouseState {
                     crate::drivers::event::push_event(crate::drivers::event::Event::Click);
                 }
             }
-            _ => self.cycle = 0,
+            _ => self.resync(),
         }
     }
 }
@@ -120,12 +148,18 @@ pub fn init() -> bool {
         mouse_write(0xF6);
         mouse_read(); // Acknowledgement
 
+        // Set sample rate to 200 reports/sec (default is 100)
+        mouse_write(0xF3);
+        mouse_read(); // Acknowledgement
+        mouse_write(200);
+        mouse_read(); // Acknowledgement
+
         // Enable mouse streaming
         mouse_write(0xF4);
         mouse_read(); // Acknowledgement
     }
 
-    crate::serial_println!("[mouse] PS/2 initialized");
+    crate::serial_println!("[mouse] PS/2 initialized (200 samples/sec)");
     true
 }
 

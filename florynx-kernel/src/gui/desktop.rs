@@ -12,8 +12,13 @@ use crate::gui::theme;
 use crate::gui::event::{Event, MouseButton, Rect};
 use crate::gui::window::Window;
 use crate::gui::dock::Dock;
+use crate::gui::menubar::MenuBar;
 
 const MAX_WINDOWS: usize = 16;
+
+const WALLPAPER_W: usize = 1024;
+const WALLPAPER_H: usize = 768;
+const WALLPAPER_RGB: &[u8] = include_bytes!("assets/wallpaper_1024x768.rgb");
 
 // ---------------------------------------------------------------------------
 // Window Manager
@@ -245,6 +250,7 @@ const MAX_DIRTY: usize = 32;
 pub struct Desktop {
     wm: WindowManager,
     dock: Dock,
+    menubar: MenuBar,
     screen_w: usize,
     screen_h: usize,
     mouse_x: usize,
@@ -262,19 +268,23 @@ pub struct Desktop {
 impl Desktop {
     fn new(screen_w: usize, screen_h: usize) -> Self {
         let mut dock = Dock::new();
-        // Default dock items with embedded icons
-        dock.add(&crate::gui::icons::ICON_FOLDER, Color::rgb(0, 122, 204));      // Files
-        dock.add(&crate::gui::icons::ICON_TERMINAL, Color::rgb(70, 70, 80));     // Terminal
-        dock.add(&crate::gui::icons::ICON_SETTINGS, Color::rgb(50, 140, 80));    // Settings
-        dock.add(&crate::gui::icons::ICON_MONITOR, Color::rgb(180, 60, 60));     // Monitor
-        dock.add(&crate::gui::icons::ICON_DOCUMENT, Color::rgb(60, 60, 150));    // Notes
+        // Default dock items with embedded icons and tooltip labels
+        dock.add_named(&crate::gui::icons::ICON_FOLDER, Color::rgb(0, 122, 204), "Files");
+        dock.add_named(&crate::gui::icons::ICON_TERMINAL, Color::rgb(70, 70, 80), "Terminal");
+        dock.add_named(&crate::gui::icons::ICON_SETTINGS, Color::rgb(50, 140, 80), "Settings");
+        dock.add_named(&crate::gui::icons::ICON_MONITOR, Color::rgb(180, 60, 60), "Monitor");
+        dock.add_named(&crate::gui::icons::ICON_DOCUMENT, Color::rgb(60, 60, 150), "Notes");
 
         // Mark first item as "active"
         dock.set_active(0, true);
 
+        let mut menubar = MenuBar::new(screen_w);
+        menubar.set_title("FlorynxOS");
+
         Desktop {
             wm: WindowManager::new(),
             dock,
+            menubar,
             screen_w,
             screen_h,
             mouse_x: screen_w / 2,
@@ -333,10 +343,24 @@ impl Desktop {
         let t = &theme::DARK;
 
         if !self.bg_cached {
-            // First time: render the expensive gradient + vignette to back buffer
-            renderer::draw_gradient_with_noise(fb, 0, 0, self.screen_w, self.screen_h,
-                t.desktop_top, t.desktop_bot, 8);
-            renderer::draw_vignette(fb, 40);
+            // Blit the embedded wallpaper image to the back buffer.
+            // Falls back to gradient if the wallpaper doesn't match screen size.
+            let expected = WALLPAPER_W * WALLPAPER_H * 3;
+            if WALLPAPER_RGB.len() >= expected
+                && self.screen_w == WALLPAPER_W
+                && self.screen_h == WALLPAPER_H
+            {
+                for y in 0..WALLPAPER_H {
+                    for x in 0..WALLPAPER_W {
+                        let i = (y * WALLPAPER_W + x) * 3;
+                        fb.set_pixel(x, y, WALLPAPER_RGB[i], WALLPAPER_RGB[i + 1], WALLPAPER_RGB[i + 2]);
+                    }
+                }
+            } else {
+                renderer::draw_gradient_with_noise(fb, 0, 0, self.screen_w, self.screen_h,
+                    t.desktop_top, t.desktop_bot, 8);
+                renderer::draw_vignette(fb, 40);
+            }
 
             // Cache the rendered background
             let total = self.screen_w * self.screen_h * 3;
@@ -359,6 +383,7 @@ impl Desktop {
 
         self.wm.draw(fb);
         self.dock.draw(fb, self.screen_w, self.screen_h);
+        self.menubar.draw(fb);
 
         // Flush entire back buffer to VRAM in one shot
         fb.flush_full();
@@ -403,6 +428,15 @@ impl Desktop {
         for i in 0..self.dirty_count {
             if dock_rect.intersects(&self.dirty[i]) {
                 self.dock.draw(fb, self.screen_w, self.screen_h);
+                break;
+            }
+        }
+
+        // 3b. Redraw menu bar if any dirty rect overlaps it (always on top)
+        let mb_rect = self.menubar.rect();
+        for i in 0..self.dirty_count {
+            if mb_rect.intersects(&self.dirty[i]) {
+                self.menubar.draw(fb);
                 break;
             }
         }
@@ -499,6 +533,7 @@ impl Desktop {
                             self.mark_dirty(w.bounds_with_shadow());
                         }
                     }
+                    self.sync_menubar_title();
                 }
             }
         }
@@ -509,6 +544,12 @@ impl Desktop {
         }
 
         if x != self.mouse_x || y != self.mouse_y {
+            // Mark old + new cursor regions dirty so the cursor redraws cleanly
+            let cw = 14;
+            let ch = 20;
+            self.mark_dirty(Rect::new(self.mouse_x, self.mouse_y, cw, ch));
+            self.mark_dirty(Rect::new(x, y, cw, ch));
+
             self.mouse_x = x;
             self.mouse_y = y;
             let ev = Event::MouseMove { x, y };
@@ -570,6 +611,15 @@ impl Desktop {
             let dock_y = self.screen_h.saturating_sub(theme::DARK.dock_h + theme::DARK.dock_margin + 10);
             self.mark_dirty(Rect::new(0, dock_y, self.screen_w, self.screen_h - dock_y));
         }
+
+        // --- Menu bar clock: dirty every ~200 ticks (1 sec at 200 Hz PIT) ---
+        static LAST_SEC: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+        let cur_sec = crate::drivers::timer::pit::get_ticks() / 200;
+        let prev = LAST_SEC.load(core::sync::atomic::Ordering::Relaxed);
+        if cur_sec != prev {
+            LAST_SEC.store(cur_sec, core::sync::atomic::Ordering::Relaxed);
+            self.mark_dirty(self.menubar.rect());
+        }
     }
 
     pub fn needs_redraw(&self) -> bool {
@@ -578,6 +628,18 @@ impl Desktop {
 
     pub fn request_redraw(&mut self) {
         self.needs_full_redraw = true;
+    }
+
+    /// Sync the menu bar title from the active window (or default to "FlorynxOS").
+    fn sync_menubar_title(&mut self) {
+        if let Some(active_slot) = self.wm.active {
+            if let Some(ref w) = self.wm.windows[active_slot] {
+                self.menubar.set_title(w.title_str());
+            }
+        } else {
+            self.menubar.set_title("FlorynxOS");
+        }
+        self.mark_dirty(self.menubar.rect());
     }
 
     fn active_user_window_id(&self) -> Option<usize> {
@@ -651,6 +713,7 @@ impl Desktop {
         
         self.add_window(win);
         self.dock.set_active(icon_idx, true);
+        self.sync_menubar_title();
         
         crate::serial_println!("[desktop] Dock icon {} clicked - created window", icon_idx);
     }
@@ -691,13 +754,33 @@ pub fn init() {
     crate::serial_println!("[desktop] GUI initialized ({}x{})", sw, sh);
 }
 
+/// Initialize desktop core without kernel demo windows.
+/// This mode is used when handing UI ownership to userland/HGUI.
+pub fn init_empty() {
+    let (sw, sh) = {
+        let guard = FRAMEBUFFER.lock();
+        match guard.as_ref() {
+            Some(fb) => fb.dimensions(),
+            None => return,
+        }
+    };
+
+    if sw == 0 || sh == 0 {
+        return;
+    }
+
+    let desktop = Desktop::new(sw, sh);
+    *DESKTOP.lock() = Some(desktop);
+    crate::serial_println!("[desktop] HGUI core initialized ({}x{})", sw, sh);
+}
+
 /// Draw the desktop (called once at startup).
 pub fn draw() {
     if let Some(ref mut fb) = *FRAMEBUFFER.lock() {
         if let Some(ref mut desktop) = *DESKTOP.lock() {
             desktop.draw_full(fb); // draws to back buffer + flush_full
             renderer::redraw_cursor_on(fb, desktop.mouse_x, desktop.mouse_y);
-            fb.flush_rect(desktop.mouse_x, desktop.mouse_y, 16, 20);
+            fb.flush_rect(desktop.mouse_x, desktop.mouse_y, 14, 20);
         }
     }
 }
@@ -705,18 +788,18 @@ pub fn draw() {
 /// Redraw only what changed. Uses dirty rects for drag, full redraw otherwise.
 /// Called from hlt_loop after each HLT wake.
 pub fn redraw_if_needed() {
-    // Step 0: Drain queued input events (IRQ-safe decoupling).
-    while let Some(ev) = crate::gui::event_bus::pop_event() {
+    // Step 0: Drain queued input events (try_lock to avoid deadlock in ISR context).
+    while let Some(ev) = crate::gui::event_bus::try_pop_event() {
         match ev {
             crate::gui::event_bus::GuiInputEvent::MouseState { x, y, buttons } => {
                 on_mouse_update(x, y, buttons);
-                // Keep cursor responsiveness by redrawing in non-IRQ context.
-                crate::gui::renderer::update_cursor(x, y);
-                if let Some(ref desktop) = *DESKTOP.lock() {
-                    if desktop.active_user_window_contains(x, y) {
-                        if let Some(slot) = desktop.active_user_window_slot() {
-                            if let Some(ref w) = desktop.wm.windows[slot] {
-                                crate::gui::event_bus::push_user_mouse_event(w.id as u32, x, y, buttons);
+                if let Some(ref guard) = DESKTOP.try_lock() {
+                    if let Some(ref desktop) = **guard {
+                        if desktop.active_user_window_contains(x, y) {
+                            if let Some(slot) = desktop.active_user_window_slot() {
+                                if let Some(ref w) = desktop.wm.windows[slot] {
+                                    crate::gui::event_bus::push_user_mouse_event(w.id as u32, x, y, buttons);
+                                }
                             }
                         }
                     }
@@ -740,10 +823,12 @@ pub fn redraw_if_needed() {
                     crate::gui::event::Key::PageUp => 0x0107,
                     crate::gui::event::Key::PageDown => 0x0108,
                 };
-                if let Some(ref desktop) = *DESKTOP.lock() {
-                    if let Some(slot) = desktop.active_user_window_slot() {
-                        if let Some(ref w) = desktop.wm.windows[slot] {
-                            crate::gui::event_bus::push_user_key_event(w.id as u32, key_code);
+                if let Some(ref guard) = DESKTOP.try_lock() {
+                    if let Some(ref desktop) = **guard {
+                        if let Some(slot) = desktop.active_user_window_slot() {
+                            if let Some(ref w) = desktop.wm.windows[slot] {
+                                crate::gui::event_bus::push_user_key_event(w.id as u32, key_code);
+                            }
                         }
                     }
                 }
@@ -790,11 +875,17 @@ pub fn redraw_if_needed() {
         if desktop.needs_full_redraw {
             desktop.draw_full(fb);
             renderer::redraw_cursor_on(fb, desktop.mouse_x, desktop.mouse_y);
-            fb.flush_rect(desktop.mouse_x, desktop.mouse_y, 16, 20);
+            fb.flush_rect(desktop.mouse_x, desktop.mouse_y, 14, 20);
         } else if desktop.dirty_count > 0 {
+            // Always include cursor area in partial redraw to prevent ghost/duplication
+            // artifacts: guarantees draw_partial clears cursor pixels before we re-save
+            // background under redraw_cursor_on.
+            let cx = desktop.mouse_x;
+            let cy = desktop.mouse_y;
+            desktop.mark_dirty(Rect::new(cx, cy, 14, 20));
             desktop.draw_partial(fb);
             renderer::redraw_cursor_on(fb, desktop.mouse_x, desktop.mouse_y);
-            fb.flush_rect(desktop.mouse_x, desktop.mouse_y, 16, 20);
+            fb.flush_rect(desktop.mouse_x, desktop.mouse_y, 14, 20);
         }
     }
 }

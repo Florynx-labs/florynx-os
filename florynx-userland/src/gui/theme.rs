@@ -104,7 +104,7 @@ pub const LINE_HEIGHT: usize = 12;
 // ---------------------------------------------------------------------------
 
 /// Default wallpaper index.
-pub const DEFAULT_WALLPAPER: usize = 0;
+pub const DEFAULT_WALLPAPER: usize = 1;
 
 /// Wallpaper filenames (stored in assets/wallpapers/).
 pub const WALLPAPER_NAMES: &[&str] = &[

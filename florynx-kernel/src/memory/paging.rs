@@ -6,11 +6,35 @@
 // =============================================================================
 
 use x86_64::registers::control::Cr3;
-use x86_64::structures::paging::{OffsetPageTable, PageTable, FrameAllocator, PhysFrame, Size4KiB, PageTableFlags};
+use x86_64::structures::paging::{OffsetPageTable, Mapper, Page, PageTable, FrameAllocator, PhysFrame, Size4KiB, PageTableFlags};
 use x86_64::VirtAddr;
 use core::sync::atomic::{AtomicU64, Ordering};
+use spin::Mutex;
+use lazy_static::lazy_static;
 
 static PHYS_OFFSET: AtomicU64 = AtomicU64::new(0);
+
+// ---------------------------------------------------------------------------
+// Global mapper singleton — registered once by kernel_main.
+// ---------------------------------------------------------------------------
+
+struct GlobalMapper(Option<OffsetPageTable<'static>>);
+
+// SAFETY: single-CPU kernel; only accessed through the Mutex.
+unsafe impl Send for GlobalMapper {}
+
+lazy_static! {
+    static ref GLOBAL_MAPPER: Mutex<GlobalMapper> = Mutex::new(GlobalMapper(None));
+}
+
+/// Register the boot-time mapper as the global singleton.
+/// Called once from `kernel_main` after `paging::init()` returns.
+pub fn init_global_mapper(mapper: OffsetPageTable<'static>) {
+    let mut g = GLOBAL_MAPPER.lock();
+    g.0 = Some(mapper);
+    crate::serial_println!("[paging] global mapper registered");
+}
+
 
 /// Initialize a new OffsetPageTable.
 ///
@@ -141,11 +165,72 @@ pub unsafe fn create_user_page_table(
     let new_table = unsafe { &mut *new_table_ptr };
     *new_table = PageTable::new();
 
-    // 3. Copy kernel mappings (entries 256..512 for x86_64 higher half)
+    // 3. Copy ALL kernel mappings so that kernel code, stacks (TSS RSP0,
+    //    IST) and the physical-memory window remain reachable when the CPU
+    //    enters Ring 0 from Ring 3 through this page table.
+    //    Lower-half kernel entries are supervisor-only, so Ring 3 cannot
+    //    access them — no isolation is lost.
     let active_table = active_level_4_table(physical_memory_offset);
-    for i in 256..512 {
+    for i in 0..512 {
         new_table[i] = active_table[i].clone();
     }
 
     Some(new_table_frame)
+}
+
+/// Map a freshly-allocated 4 KiB physical frame at `virt` with the given
+/// flags using the global mapper and global frame allocator.
+/// Returns `Err` if either singleton is uninitialised or OOM.
+pub fn map_page_now(virt: VirtAddr, flags: PageTableFlags) -> Result<PhysFrame, &'static str> {
+    let frame = crate::memory::frame_allocator::alloc_frame()
+        .ok_or("OOM: no physical frame available")?;
+    let mut gm = GLOBAL_MAPPER.lock();
+    let mapper = gm.0.as_mut().ok_or("global mapper not initialised")?;
+    let page: Page<Size4KiB> = Page::containing_address(virt);
+    unsafe {
+        mapper
+            .map_to(page, frame, flags, &mut PtFrameAlloc)
+            .map_err(|_| "map_to failed")?
+            .flush();
+    }
+    Ok(frame)
+}
+
+/// Install a guard page at `virt`: ensure it is NOT present so any access
+/// generates a page fault (stack-overflow / out-of-bounds detection).
+/// If the page was previously mapped, it is unmapped and the frame freed.
+pub fn install_guard_page(virt: VirtAddr) {
+    let page: Page<Size4KiB> = Page::containing_address(virt);
+    let mut gm = GLOBAL_MAPPER.lock();
+    let mapper = match gm.0.as_mut() {
+        Some(m) => m,
+        None => return,
+    };
+    if let Ok((frame, flush)) = mapper.unmap(page) {
+        flush.flush();
+        crate::memory::frame_allocator::deallocate_frame(frame);
+    }
+    // If not mapped, already a guard page — nothing to do.
+}
+
+/// Adapter: allocates intermediate page-table frames from the global allocator.
+pub struct PtFrameAlloc;
+unsafe impl FrameAllocator<Size4KiB> for PtFrameAlloc {
+    fn allocate_frame(&mut self) -> Option<PhysFrame> {
+        crate::memory::frame_allocator::alloc_frame()
+    }
+}
+
+/// Build an OffsetPageTable view for an explicit L4 frame.
+///
+/// # Safety
+/// Caller must ensure `l4_frame` is a valid level-4 page table frame and
+/// physical memory is mapped at `physical_memory_offset`.
+pub unsafe fn init_from_l4_frame(
+    l4_frame: PhysFrame,
+    physical_memory_offset: VirtAddr,
+) -> OffsetPageTable<'static> {
+    let virt = physical_memory_offset + l4_frame.start_address().as_u64();
+    let l4_ptr: *mut PageTable = virt.as_mut_ptr();
+    OffsetPageTable::new(&mut *l4_ptr, physical_memory_offset)
 }

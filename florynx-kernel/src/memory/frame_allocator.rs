@@ -6,8 +6,15 @@
 // =============================================================================
 
 use bootloader::bootinfo::{MemoryMap, MemoryRegionType};
+use alloc::vec::Vec;
+use spin::Mutex;
+use lazy_static::lazy_static;
 use x86_64::structures::paging::{FrameAllocator, PhysFrame, Size4KiB};
 use x86_64::PhysAddr;
+
+lazy_static! {
+    static ref FREED_FRAMES: Mutex<Vec<PhysFrame>> = Mutex::new(Vec::new());
+}
 
 /// A frame allocator that returns usable frames from the bootloader memory map.
 ///
@@ -78,6 +85,9 @@ impl BootInfoFrameAllocator {
 
 unsafe impl FrameAllocator<Size4KiB> for BootInfoFrameAllocator {
     fn allocate_frame(&mut self) -> Option<PhysFrame> {
+        if let Some(frame) = FREED_FRAMES.lock().pop() {
+            return Some(frame);
+        }
         if self.region_idx >= self.memory_map.len() {
             return None; // Out of memory
         }
@@ -95,4 +105,38 @@ unsafe impl FrameAllocator<Size4KiB> for BootInfoFrameAllocator {
 
         Some(frame)
     }
+}
+
+pub fn deallocate_frame(frame: PhysFrame) {
+    FREED_FRAMES.lock().push(frame);
+}
+
+// ---------------------------------------------------------------------------
+// Global frame allocator singleton — used by demand paging / guard page code.
+// ---------------------------------------------------------------------------
+
+struct GlobalFrameAlloc(Option<BootInfoFrameAllocator>);
+
+// SAFETY: single-CPU kernel; the allocator is only accessed through the Mutex.
+unsafe impl Send for GlobalFrameAlloc {}
+
+lazy_static! {
+    static ref GLOBAL_FRAME_ALLOC: Mutex<GlobalFrameAlloc> =
+        Mutex::new(GlobalFrameAlloc(None));
+}
+
+/// Register the boot-time frame allocator as the global singleton.
+/// Must be called exactly once from `kernel_main`, after the local allocator
+/// has been initialised and the heap is ready.
+pub fn init_global(alloc: BootInfoFrameAllocator) {
+    let mut g = GLOBAL_FRAME_ALLOC.lock();
+    g.0 = Some(alloc);
+    crate::serial_println!("[frame_alloc] global frame allocator registered");
+}
+
+/// Allocate a single 4 KiB physical frame from the global allocator.
+/// Returns `None` if OOM or if `init_global` was not yet called.
+pub fn alloc_frame() -> Option<PhysFrame> {
+    let mut g = GLOBAL_FRAME_ALLOC.lock();
+    g.0.as_mut()?.allocate_frame()
 }

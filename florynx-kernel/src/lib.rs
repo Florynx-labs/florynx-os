@@ -81,6 +81,13 @@ pub fn launch_desktop() {
     serial_println!("[kernel] desktop GUI launched");
 }
 
+/// Launch HGUI mode: compositor core only, no kernel demo windows.
+/// Userland is expected to own the visible shell through GUI syscalls.
+pub fn launch_hgui() {
+    gui::hgui_link::launch_core();
+    serial_println!("[kernel] HGUI mode launched");
+}
+
 /// Halt loop — stops the CPU until the next interrupt.
 pub fn hlt_loop() -> ! {
     serial_println!("[kernel] entering stable hlt_loop");
