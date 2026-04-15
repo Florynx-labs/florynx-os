@@ -24,6 +24,19 @@ const EEXIST: i64 = -17;
 const ESRCH: i64 = -3;
 const ENOSYS: i64 = -38;
 
+fn syscall_guard(ptr: u64, expected_size: usize) -> Result<(), i64> {
+    if ptr == 0 { return Err(EFAULT); }
+    let hdr_bytes = usermem::copy_from_user(ptr, 4)?;
+    let supplied_size = u16::from_ne_bytes([hdr_bytes[0], hdr_bytes[1]]);
+    let supplied_version = u16::from_ne_bytes([hdr_bytes[2], hdr_bytes[3]]);
+    
+    if supplied_version != ABI_V1 || supplied_size < expected_size as u16 {
+        return Err(EINVAL);
+    }
+    Ok(())
+}
+
+
 /// sys_write — write data to a file descriptor.
 /// fd=0: stdin (invalid for write)
 /// fd=1: stdout → serial + VGA
@@ -270,16 +283,8 @@ pub fn sys_abi_info(out_ptr: u64, out_len: u64, _arg3: u64) -> i64 {
         return EINVAL;
     }
     
-    // SECURITY: Read and validate the caller's struct header
-    let hdr_bytes = match usermem::copy_from_user(out_ptr, 4) {
-        Ok(b) => b,
-        Err(e) => return e,
-    };
-    let supplied_size = u16::from_ne_bytes([hdr_bytes[0], hdr_bytes[1]]);
-    let supplied_version = u16::from_ne_bytes([hdr_bytes[2], hdr_bytes[3]]);
-    
-    if supplied_version != ABI_V1 || supplied_size < core::mem::size_of::<AbiInfoV1>() as u16 {
-        return EINVAL;
+    if let Err(e) = syscall_guard(out_ptr, core::mem::size_of::<AbiInfoV1>()) {
+        return e;
     }
 
     let info = AbiInfoV1 {
@@ -310,14 +315,8 @@ pub fn sys_debug_telemetry(out_ptr: u64, out_len: u64, _arg3: u64) -> i64 {
         return EINVAL;
     }
     
-    // SECURITY: Read and validate the caller's struct header
-    let hdr_bytes = match usermem::copy_from_user(out_ptr, 4) {
-        Ok(b) => b,
-        Err(e) => return e,
-    };
-    let supplied_version = u16::from_ne_bytes([hdr_bytes[2], hdr_bytes[3]]);
-    if supplied_version != ABI_V1 {
-        return EINVAL;
+    if let Err(e) = syscall_guard(out_ptr, core::mem::size_of::<KernelTelemetryV1>()) {
+        return e;
     }
 
     let fault = crate::arch::x86_64::idt::fault_telemetry();
@@ -327,6 +326,7 @@ pub fn sys_debug_telemetry(out_ptr: u64, out_len: u64, _arg3: u64) -> i64 {
             size: core::mem::size_of::<KernelTelemetryV1>() as u16,
             version: ABI_V1,
         },
+        _pad: 0,
         page_fault_total: fault.page_fault_total,
         page_fault_user: fault.page_fault_user,
         page_fault_kernel: fault.page_fault_kernel,
@@ -374,13 +374,8 @@ pub fn sys_stat(path_ptr: u64, path_len: u64, stat_ptr: u64) -> i64 {
     
     // SECURITY: Validate stat_ptr header
     if stat_ptr != 0 {
-        let hdr_bytes = match usermem::copy_from_user(stat_ptr, 4) {
-            Ok(b) => b,
-            Err(_) => return EINVAL,
-        };
-        let supplied_version = u16::from_ne_bytes([hdr_bytes[2], hdr_bytes[3]]);
-        if supplied_version != ABI_V1 {
-            return EINVAL; // ABI mismatch
+        if let Err(e) = syscall_guard(stat_ptr, core::mem::size_of::<UserStatV1>()) {
+            return e;
         }
     }
 
@@ -397,6 +392,7 @@ pub fn sys_stat(path_ptr: u64, path_len: u64, stat_ptr: u64) -> i64 {
                     size: core::mem::size_of::<UserStatV1>() as u16,
                     version: ABI_V1,
                 },
+                _pad: 0,
                 inode: stat.inode,
                 size: stat.size,
                 file_type: match stat.file_type {

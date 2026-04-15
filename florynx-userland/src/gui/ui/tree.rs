@@ -2,7 +2,7 @@ use alloc::boxed::Box;
 
 use crate::gui::api::GuiEventV1;
 
-use super::event::{Event, EventResult};
+use super::event::{Event, EventResult, KeyCode};
 use super::geometry::{Constraints, Rect, Size};
 use super::render_context::{RenderBackend, RenderContext, SyscallRenderBackend};
 use super::widget::{Widget, WidgetId};
@@ -45,7 +45,7 @@ impl UiRuntime {
         if let Some((x, y)) = match event {
             Event::MouseMove(x, y) => Some((x, y)),
             Event::Click(x, y) => Some((x, y)),
-            Event::KeyPress(_) => None,
+            Event::KeyPress(_) | Event::KeyDown(_) => None,
         } {
             self.cursor_raw = (x as f32, y as f32);
         }
@@ -92,14 +92,27 @@ impl UiRuntime {
                 }
             }
             GuiEventV1::KeyPress { code, .. } => {
-                let ch = match code {
-                    8 => '\u{8}',
-                    32..=126 => code as u8 as char,
-                    _ => return None,
-                };
-                Some(Event::KeyPress(ch))
+                // Map extended key codes to KeyDown events
+                match code {
+                    8 => Some(Event::KeyDown(KeyCode::Backspace)),
+                    127 => Some(Event::KeyDown(KeyCode::Delete)),
+                    0x100 => Some(Event::KeyDown(KeyCode::ArrowLeft)),
+                    0x101 => Some(Event::KeyDown(KeyCode::ArrowRight)),
+                    0x102 => Some(Event::KeyDown(KeyCode::ArrowUp)),
+                    0x103 => Some(Event::KeyDown(KeyCode::ArrowDown)),
+                    0x104 => Some(Event::KeyDown(KeyCode::Home)),
+                    0x105 => Some(Event::KeyDown(KeyCode::End)),
+                    13 => Some(Event::KeyDown(KeyCode::Enter)),
+                    9 => Some(Event::KeyDown(KeyCode::Tab)),
+                    27 => Some(Event::KeyDown(KeyCode::Escape)),
+                    32..=126 => Some(Event::KeyDown(KeyCode::Char(code as u8 as char))),
+                    _ => None,
+                }
             }
-            GuiEventV1::WindowCreated { .. } | GuiEventV1::WindowDestroyed { .. } => None,
+            GuiEventV1::WindowCreated { .. }
+            | GuiEventV1::WindowDestroyed { .. }
+            | GuiEventV1::WindowFocused { .. }
+            | GuiEventV1::WindowResized { .. } => None,
         }
     }
 

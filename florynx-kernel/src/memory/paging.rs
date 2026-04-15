@@ -234,3 +234,86 @@ pub unsafe fn init_from_l4_frame(
     let l4_ptr: *mut PageTable = virt.as_mut_ptr();
     OffsetPageTable::new(&mut *l4_ptr, physical_memory_offset)
 }
+/// Recursively free all physical frames belonging to the user-space portion (0..256)
+/// of the given level-4 page table. Does NOT free kernel-half mappings.
+/// After walking the children, it deallocates the L4 frame itself.
+///
+/// # Safety
+/// Caller must ensure `l4_frame` uniquely belongs to this process and is no longer active.
+pub unsafe fn deep_cleanup_user_page_tables(l4_frame: PhysFrame) {
+    let phys_offset = match physical_memory_offset() {
+        Some(o) => o,
+        None => return,
+    };
+    
+    let l4_virt = phys_offset + l4_frame.start_address().as_u64();
+    let l4_table: &mut PageTable = &mut *(l4_virt.as_mut_ptr());
+
+    // Only iterate over the user-space half (0..256)
+    for i in 0..256 {
+        let entry = &mut l4_table[i];
+        if entry.flags().contains(PageTableFlags::PRESENT) {
+            let l3_frame = PhysFrame::containing_address(entry.addr());
+            cleanup_l3_recursive(l3_frame, phys_offset);
+            // After cleaning up the subtree, we don't zero the entry as the L4 frame is going away.
+        }
+    }
+
+    // Finally, deallocate the L4 table frame itself.
+    crate::memory::frame_allocator::deallocate_frame(l4_frame);
+}
+
+unsafe fn cleanup_l3_recursive(frame: PhysFrame, phys_offset: VirtAddr) {
+    let table_virt = phys_offset + frame.start_address().as_u64();
+    let table: &mut PageTable = &mut *(table_virt.as_mut_ptr());
+
+    for i in 0..512 {
+        let entry = &mut table[i];
+        if entry.flags().contains(PageTableFlags::PRESENT) {
+            if entry.flags().contains(PageTableFlags::HUGE_PAGE) {
+                // It's a 1GB page - free the frame and continue
+                crate::memory::frame_allocator::deallocate_frame(PhysFrame::containing_address(entry.addr()));
+            } else {
+                let l2_frame = PhysFrame::containing_address(entry.addr());
+                cleanup_l2_recursive(l2_frame, phys_offset);
+            }
+        }
+    }
+    // Deallocate this L3 table frame
+    crate::memory::frame_allocator::deallocate_frame(frame);
+}
+
+unsafe fn cleanup_l2_recursive(frame: PhysFrame, phys_offset: VirtAddr) {
+    let table_virt = phys_offset + frame.start_address().as_u64();
+    let table: &mut PageTable = &mut *(table_virt.as_mut_ptr());
+
+    for i in 0..512 {
+        let entry = &mut table[i];
+        if entry.flags().contains(PageTableFlags::PRESENT) {
+            if entry.flags().contains(PageTableFlags::HUGE_PAGE) {
+                // It's a 2MB page - free the frame
+                crate::memory::frame_allocator::deallocate_frame(PhysFrame::containing_address(entry.addr()));
+            } else {
+                let l1_frame = PhysFrame::containing_address(entry.addr());
+                cleanup_l1_recursive(l1_frame, phys_offset);
+            }
+        }
+    }
+    // Deallocate this L2 table frame
+    crate::memory::frame_allocator::deallocate_frame(frame);
+}
+
+unsafe fn cleanup_l1_recursive(frame: PhysFrame, phys_offset: VirtAddr) {
+    let table_virt = phys_offset + frame.start_address().as_u64();
+    let table: &mut PageTable = &mut *(table_virt.as_mut_ptr());
+
+    for i in 0..512 {
+        let entry = &mut table[i];
+        if entry.flags().contains(PageTableFlags::PRESENT) {
+            // It's a 4KB leaf frame - free it
+            crate::memory::frame_allocator::deallocate_frame(PhysFrame::containing_address(entry.addr()));
+        }
+    }
+    // Deallocate this L1 table frame
+    crate::memory::frame_allocator::deallocate_frame(frame);
+}

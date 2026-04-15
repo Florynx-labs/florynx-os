@@ -51,14 +51,14 @@ pub const E_NOSYS: i64 = -38;
 pub const ABI_V1: u16 = 1;
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct AbiHeader {
     pub size: u16,
     pub version: u16,
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct AbiInfoV1 {
     pub hdr: AbiHeader,
     pub abi_major: u16,
@@ -67,18 +67,20 @@ pub struct AbiInfoV1 {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct UserStatV1 {
     pub hdr: AbiHeader,
+    pub _pad: u32, // Explicitly zeroed padding to prevent stack leak
     pub inode: u64,
     pub size: u64,
     pub file_type: u64,
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct KernelTelemetryV1 {
     pub hdr: AbiHeader,
+    pub _pad: u32, // Explicitly zeroed padding to prevent stack leak
     pub page_fault_total: u64,
     pub page_fault_user: u64,
     pub page_fault_kernel: u64,

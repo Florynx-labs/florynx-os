@@ -231,6 +231,14 @@ impl DesktopShell {
                 GuiEventV1::WindowDestroyed { win_id } => {
                     self.unregister_window(win_id);
                 }
+                GuiEventV1::WindowFocused { win_id } => {
+                    self.set_active_window(win_id);
+                }
+                GuiEventV1::WindowResized { win_id, w: _, h: _ } => {
+                    // Window resized in kernel — update taskbar if needed
+                    let _ = win_id;
+                    self.needs_redraw = true;
+                }
             }
 
             processed += 1;

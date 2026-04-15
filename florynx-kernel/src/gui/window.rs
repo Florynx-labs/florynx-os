@@ -7,13 +7,14 @@
 // =============================================================================
 
 use alloc::vec::Vec;
+use alloc::format;
 use crate::gui::renderer::{self, Color, FramebufferManager};
 use crate::gui::theme;
 use crate::gui::event::{Event, MouseButton, Rect};
 use crate::gui::animation::{AnimatedPos, AnimatedOpacity};
 
 const MAX_TITLE: usize = 48;
-const MAX_CONTENT: usize = 256;
+const MAX_CONTENT: usize = 4096;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WindowId {
@@ -99,6 +100,11 @@ pub struct Window {
     pub user_rect: Option<(usize, usize, usize, usize, u32)>,
     /// True if this window is created from userland syscalls.
     pub user_owned: bool,
+
+    // terminal / shell state
+    pub is_terminal: bool,
+    pub command_buffer: [u8; 128],
+    pub command_len: usize,
 }
 
 impl Window {
@@ -138,6 +144,9 @@ impl Window {
             dirty: true, // needs initial draw
             user_rect: None,
             user_owned: false,
+            is_terminal: false,
+            command_buffer: [0u8; 128],
+            command_len: 0,
         }
     }
 
@@ -561,9 +570,12 @@ impl Window {
                     Key::Char(c) => {
                         // Append character to content if there's space
                         if self.content_len < MAX_CONTENT {
-                            self.content[self.content_len] = c as u8;
-                            self.content_len += 1;
-                            self.dirty = true;
+                            self.append_text(core::str::from_utf8(&[c as u8]).unwrap_or(""));
+                            
+                            if self.is_terminal && self.command_len < 128 {
+                                self.command_buffer[self.command_len] = c as u8;
+                                self.command_len += 1;
+                            }
                             return true;
                         }
                     }
@@ -572,15 +584,33 @@ impl Window {
                         if self.content_len > 0 {
                             self.content_len -= 1;
                             self.dirty = true;
+                            if self.is_terminal && self.command_len > 0 {
+                                self.command_len -= 1;
+                            }
                             return true;
                         }
                     }
                     Key::Enter => {
                         // Add newline
                         if self.content_len < MAX_CONTENT {
-                            self.content[self.content_len] = b'\n';
-                            self.content_len += 1;
-                            self.dirty = true;
+                            self.append_text("\n");
+                            
+                            if self.is_terminal {
+                                let mut local_buf = [0u8; 128];
+                                let len = self.command_len;
+                                local_buf[..len].copy_from_slice(&self.command_buffer[..len]);
+                                
+                                self.command_len = 0; // clear early
+                                
+                                // We cannot pass a string slice that borrows local_buf into self.execute if we need to modify self,
+                                // wait! local_buf is completely separate from self! So self is NOT borrowed.
+                                // But str::from_utf8(&local_buf) borrows local_buf, NOT self. So this is perfectly fine!
+                                // Actually, let's just create a String. We have `alloc::string::String`.
+                                
+                                // To be 100% rust-safe and avoid any issues:
+                                let cmd_string = alloc::string::String::from_utf8_lossy(&local_buf[..len]).into_owned();
+                                self.execute_shell_command(cmd_string.trim());
+                            }
                             return true;
                         }
                     }
@@ -593,6 +623,80 @@ impl Window {
             }
             _ => false,
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Terminal Shell Logic (florsh)
+    // -----------------------------------------------------------------------
+
+    fn append_text(&mut self, text: &str) {
+        let text_bytes = text.as_bytes();
+        let remaining = MAX_CONTENT.saturating_sub(self.content_len);
+        let copy_len = text_bytes.len().min(remaining);
+        
+        if copy_len > 0 {
+            self.content[self.content_len..self.content_len + copy_len].copy_from_slice(&text_bytes[..copy_len]);
+            self.content_len += copy_len;
+            self.dirty = true;
+        } else {
+            // Buffer full, scroll up
+            let shift = 512;
+            if self.content_len > shift {
+                let new_len = self.content_len - shift;
+                for i in 0..new_len {
+                    self.content[i] = self.content[i + shift];
+                }
+                self.content_len = new_len;
+                self.append_text(text);
+            }
+        }
+    }
+
+    fn execute_shell_command(&mut self, cmd: &str) {
+        if cmd.is_empty() {
+             self.append_text("$ ");
+             return;
+        }
+
+        let mut parts = cmd.split_whitespace();
+        let prog = parts.next().unwrap_or("");
+
+        match prog {
+            "help" => self.append_text("florsh v0.1\nBuilt-in commands: clear, echo, date, uname, ls, cd, help\n"),
+            "clear" => {
+                self.content_len = 0; // Clear text
+            }
+            "echo" => {
+                let rest = cmd[prog.len()..].trim();
+                self.append_text(rest);
+                self.append_text("\n");
+            }
+            "uname" => {
+                self.append_text("FlorynxOS Sentinel x86_64\n");
+            }
+            "date" => {
+                let rtc = crate::time::rtc::now_rtc();
+                let year = rtc.year as u16 + 2000;
+                let s = format!("{:02}/{:02}/{} {:02}:{:02}:{:02}\n", 
+                    rtc.day, rtc.month, year, rtc.hours, rtc.minutes, rtc.seconds);
+                self.append_text(&s);
+            }
+            "ls" => {
+                self.append_text("dev/  bin/  tmp/  home/  ROADMAP.md\n");
+            }
+            "cd" => {
+                self.append_text("VFS mountpoints not dynamic yet. Cannot change directory.\n");
+            }
+            "exit" => {
+                self.append_text("Use the red close button to exit the terminal.\n");
+            }
+            _ => {
+                let s = format!("{}: command not found\n", prog);
+                self.append_text(&s);
+            }
+        }
+        
+        self.append_text("$ ");
     }
 
     /// Execute resize based on mouse delta.

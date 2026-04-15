@@ -81,7 +81,7 @@ impl Widget for Button {
                 }
                 EventResult::Ignored
             }
-            Event::KeyPress(_) => EventResult::Ignored,
+            Event::KeyPress(_) | Event::KeyDown(_) => EventResult::Ignored,
         }
     }
 

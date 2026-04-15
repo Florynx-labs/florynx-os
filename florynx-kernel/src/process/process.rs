@@ -192,9 +192,11 @@ fn cleanup_process_links_for_task(task_id: TaskId) -> (usize, usize, usize) {
                 p.user_regions.clear();
                 if let Some(pt) = p.page_table.take() {
                     if p.owns_page_table {
-                        crate::memory::frame_allocator::deallocate_frame(
-                            PhysFrame::containing_address(pt),
-                        );
+                        unsafe {
+                            crate::memory::paging::deep_cleanup_user_page_tables(
+                                PhysFrame::containing_address(pt)
+                            );
+                        }
                     }
                     page_tables += 1;
                 }

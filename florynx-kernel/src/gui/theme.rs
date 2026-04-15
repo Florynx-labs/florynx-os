@@ -34,6 +34,17 @@ pub struct Theme {
     pub menubar_bg: Color,
     pub tooltip_bg: Color,
     pub tooltip_text: Color,
+    // Search bar (menubar)
+    pub search_bar_bg: Color,
+    pub search_bar_text: Color,
+    // Snap preview
+    pub snap_preview: Color,
+    // Resize constraints
+    pub resize_grab: usize,
+    pub min_window_w: usize,
+    pub min_window_h: usize,
+    // Selection highlight
+    pub selection_bg: Color,
 }
 
 pub static DARK: Theme = Theme {
@@ -65,4 +76,15 @@ pub static DARK: Theme = Theme {
     menubar_bg:      Color::TRANSPARENT,       // Fully transparent floating menubar
     tooltip_bg:      Color::rgba(20, 25, 35, 200), // Glassy dark tooltip
     tooltip_text:    Color::rgb(243, 247, 250),
+    // Search bar
+    search_bar_bg:   Color::rgba(80, 85, 95, 160),
+    search_bar_text: Color::rgb(130, 138, 150),
+    // Snap preview
+    snap_preview:    Color::rgba(41, 211, 208, 40),
+    // Resize constraints
+    resize_grab:     6,
+    min_window_w:    160,
+    min_window_h:    100,
+    // Selection highlight
+    selection_bg:    Color::rgba(41, 211, 208, 60),
 };

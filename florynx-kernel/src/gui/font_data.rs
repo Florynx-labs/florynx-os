@@ -9,6 +9,7 @@
 // =============================================================================
 
 use crate::gui::font::{Glyph, FontFace};
+use crate::gui::renderer::{FramebufferManager, Color};
 
 // ---------------------------------------------------------------------------
 // Macro to define glyphs compactly

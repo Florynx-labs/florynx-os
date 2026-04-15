@@ -79,11 +79,17 @@ impl Dock {
         let t = &theme::DARK;
         let dr = self.dock_rect(screen_w, screen_h);
 
-        // Glassy dock background
-        // First draw a dark sheer layer, then the frosty theme layer
-        renderer::draw_rounded_rect(fb, dr.x, dr.y, dr.w, dr.h, 18, Color::rgba(0, 0, 0, 80));
-        renderer::draw_rounded_rect(fb, dr.x, dr.y, dr.w, dr.h, 18, t.dock_bg);
-        renderer::draw_rounded_border(fb, dr.x, dr.y, dr.w, dr.h, 18, t.border);
+        // Dock background (enhanced glassmorphism — lighter, more transparent)
+        renderer::draw_rounded_rect(fb, dr.x, dr.y, dr.w, dr.h, 18,
+            Color::rgba(0, 0, 0, 60));
+        renderer::draw_rounded_rect(fb, dr.x, dr.y, dr.w, dr.h, 18,
+            Color::rgba(25, 32, 45, 180));
+        // Inner glow border for frosted glass effect
+        renderer::draw_rounded_border(fb, dr.x, dr.y, dr.w, dr.h, 18,
+            Color::rgba(80, 90, 110, 120));
+        // Subtle inner highlight at top
+        renderer::draw_hline(fb, dr.x + 18, dr.y + 1, dr.w.saturating_sub(36),
+            Color::rgba(255, 255, 255, 20));
 
         // Icons with scale animation
         for i in 0..self.count {
@@ -123,21 +129,22 @@ impl Dock {
             }
         }
 
-        // Draw tooltip above hovered icon
+        // Draw tooltip above hovered icon (with AA text)
         if let Some(hi) = self.hovered {
             if let Some(item) = &self.items[hi] {
                 if item.name_len > 0 {
                     let ir = self.icon_rect(hi, screen_w, screen_h);
                     let label = core::str::from_utf8(&item.name[..item.name_len]).unwrap_or("");
-                    let text_w = label.len() * 8;
-                    let pad = 8;
+                    let text_w = renderer::measure_text_aa(label, renderer::FontSize::Normal);
+                    let pad = 10;
                     let tw = text_w + pad * 2;
-                    let th = 20;
+                    let th = 22;
                     let tx = (ir.x + ICON_SIZE / 2).saturating_sub(tw / 2);
-                    let ty = ir.y.saturating_sub(th + 6);
-                    renderer::draw_rounded_rect(fb, tx, ty, tw, th, 6, t.tooltip_bg);
-                    renderer::draw_rounded_border(fb, tx, ty, tw, th, 6, t.border);
-                    renderer::draw_text(fb, label, tx + pad, ty + (th.saturating_sub(8)) / 2, t.tooltip_text, 1);
+                    let ty = ir.y.saturating_sub(th + 8);
+                    renderer::draw_rounded_rect(fb, tx, ty, tw, th, 8, t.tooltip_bg);
+                    renderer::draw_rounded_border(fb, tx, ty, tw, th, 8, t.border);
+                    renderer::draw_text_aa(fb, label, tx + pad, ty + (th.saturating_sub(8)) / 2,
+                        t.tooltip_text, renderer::FontSize::Normal);
                 }
             }
         }

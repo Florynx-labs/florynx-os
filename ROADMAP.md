@@ -113,10 +113,10 @@ This document maps out the gap between the current FlorynxOS microkernel and a f
 - [x] `execve` syscall (flat-binary loader at 0x400000)
 
 ### 4.3 Shell
-- [ ] Interactive command-line shell (`florsh`)
+- [x] Interactive command-line shell (`florsh`)
 - [ ] PATH lookup, piping (`|`), redirection (`>`, `<`)
 - [ ] Job control (fg, bg, Ctrl-C)
-- [ ] Built-in commands: `cd`, `ls`, `cat`, `echo`, `exit`, `clear`
+- [x] Built-in commands: `cd`, `ls`, `cat`, `echo`, `exit`, `clear`
 
 ### 4.4 Core Utilities
 - [ ] `ls`, `cat`, `cp`, `mv`, `rm`, `mkdir`, `rmdir`
@@ -136,11 +136,11 @@ This document maps out the gap between the current FlorynxOS microkernel and a f
 - [ ] Font size selection
 
 ### 5.2 Compositor Improvements
-- [ ] Per-pixel alpha blending (true transparency, not opaque rects)
-- [ ] Window minimize / maximize animations
-- [ ] Window resize with drag handles
-- [ ] Multi-monitor support (extended desktop)
-- [ ] Double-buffered VSync
+- [x] Per-pixel alpha blending mechanics (`Color::rgba` / Frosty blur logic)
+- [x] Phase 4 GUI Integrations (Interactive Shell, Menubar, Dynamic Dock)
+- [ ] Render API Optimizations (Hardware blitting, partial compositing upgrades)
+- [ ] TrueType Font (TTF) Rendering Engine & Advanced Typography
+- [ ] PNG Decoder for High-Res Custom Icons & Wallpapers
 
 ### 5.3 Widget Toolkit
 - [ ] Scrollbar, checkbox, radio button, dropdown

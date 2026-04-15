@@ -77,6 +77,8 @@ pub enum GuiEventV1 {
     KeyPress { win_id: u32, code: u16 },
     WindowCreated { win_id: u32 },
     WindowDestroyed { win_id: u32 },
+    WindowFocused { win_id: u32 },
+    WindowResized { win_id: u32, w: u16, h: u16 },
 }
 
 pub fn poll_event_v1() -> Option<GuiEventV1> {
@@ -106,6 +108,16 @@ pub fn poll_event_v1() -> Option<GuiEventV1> {
         4 => {
             let win_id = ((raw >> 40) & 0xFFFF) as u32;
             Some(GuiEventV1::WindowDestroyed { win_id })
+        }
+        5 => {
+            let win_id = ((raw >> 40) & 0xFFFF) as u32;
+            Some(GuiEventV1::WindowFocused { win_id })
+        }
+        6 => {
+            let win_id = ((raw >> 40) & 0xFFFF) as u32;
+            let w = ((raw >> 16) & 0xFFFF) as u16;
+            let h = (raw & 0xFFFF) as u16;
+            Some(GuiEventV1::WindowResized { win_id, w, h })
         }
         _ => None,
     }

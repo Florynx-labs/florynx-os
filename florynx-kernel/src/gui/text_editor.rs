@@ -5,7 +5,7 @@
 // =============================================================================
 
 use alloc::vec::Vec;
-use crate::gui::renderer::{self, Color, FramebufferManager};
+use crate::gui::renderer::{self, Color, FramebufferManager, FontSize};
 use crate::gui::event::{Event, Key, Rect};
 use crate::gui::theme;
 use crate::gui::widgets::{Button, Panel};
@@ -79,17 +79,20 @@ impl TextEditor {
             let ly = text_y + 5 + i * line_height;
             if ly + line_height > text_y + text_h { break; }
 
-            // Line number
+            // Line number (slightly dimmer, AA)
             let line_num = alloc::format!("{}", i + 1);
-            renderer::draw_text(fb, &line_num, self.x + 10, ly, Color::rgb(80, 85, 95), 1);
+            renderer::draw_text_aa(fb, &line_num, self.x + 10, ly, Color::rgb(80, 85, 95), FontSize::Normal);
 
-            // Line text
+            // Line text (AA)
             let line_text = core::str::from_utf8(&self.lines[i][..*line_len]).unwrap_or("");
-            renderer::draw_text(fb, line_text, self.x + 40, ly, t.text, 1);
+            renderer::draw_text_aa(fb, line_text, self.x + 40, ly, t.text, FontSize::Normal);
 
             // Cursor
             if i == self.cursor_line {
-                let cursor_x = self.x + 40 + self.cursor_col * 8;
+                // Calculate cursor X using proportional width of text UP TO the cursor
+                let cursor_str = core::str::from_utf8(&self.lines[i][..self.cursor_col]).unwrap_or("");
+                let text_w = renderer::measure_text_aa(cursor_str, FontSize::Normal);
+                let cursor_x = self.x + 40 + text_w;
                 renderer::draw_vline(fb, cursor_x, ly, 10, t.accent);
             }
         }

@@ -854,32 +854,33 @@ impl Desktop {
         let win = match icon_idx {
             0 => {
                 // Files icon
-                let mut w = Window::new(0, x, y, 500, 400, "Files");
-                w.set_content("File Manager\n\nBrowse your files here.\n\n(VFS not yet implemented)");
+                let mut w = Window::new(0, x, y, 650, 450, "Files");
+                w.set_content("Florynx File Manager\n\n[ HOME ]\n- Documents\n- Downloads\n- Pictures\n\n[ SYSTEM ]\n- /dev\n- /bin\n- /tmp\n\n\n(VFS bindings in development - Phase 6)");
                 w
             }
             1 => {
                 // Terminal icon
-                let mut w = Window::new(0, x, y, 600, 400, "Terminal");
-                w.set_content("Florynx Terminal\n\n$ Welcome to FlorynxOS\n$ Type commands here\n\n(Shell not yet implemented)");
+                let mut w = Window::new(0, x, y, 650, 420, "Terminal");
+                w.is_terminal = true;
+                w.set_content("florsh v0.1 — Welcome to Florynx OS\n$ ");
                 w
             }
             2 => {
                 // Settings icon
-                let mut w = Window::new(0, x, y, 450, 350, "Settings");
-                w.set_content("System Settings\n\nConfigure your system:\n- Display\n- Keyboard\n- Mouse\n- Network\n\n(Settings panel coming soon)");
+                let mut w = Window::new(0, x, y, 500, 450, "Settings");
+                w.set_content("System Settings\n\n[ Appearance ]\nTheme: Bioluminescent Glass\nColors: Active\n\n[ Network ]\nWi-Fi: Disconnected\n\n[ Security ]\nCapabilities: Enforcing\n\n(Settings Panel UI expected in Phase 5)");
                 w
             }
             3 => {
                 // Monitor icon
                 let mut w = Window::new(0, x, y, 500, 400, "System Monitor");
-                w.set_content("System Monitor\n\nCPU: AMD64\nMemory: 4 MiB heap\nUptime: Running\n\n(Real-time stats coming soon)");
+                w.set_content("System Monitor (top)\n\nCPU: AMD64 x86_64\nMemory: 16 MiB kernel heap pool\nProcesses: 3 running\n\n[ID]   [NAME]         [MEM]\n  1    kernel_idle    2.1M\n  2    compositor     8.4M\n  3    florsh         1.2M\n\n(Real-time stats coming soon)");
                 w
             }
             4 => {
                 // Notes/Document icon
-                let mut w = Window::new(0, x, y, 500, 400, "Notes");
-                w.set_content("Welcome to Notes!\n\nType your notes here.\nPress Enter for new lines.\nBackspace to delete.\n\nThis is a simple text editor.");
+                let mut w = Window::new(0, x, y, 550, 400, "Notes");
+                w.set_content("Florynx Notes\n\nType your thoughts here...\nSupports Backspace and new lines.\nEverything is seamlessly redrawn through the double-buffered dirty engine!");
                 w
             }
             _ => {

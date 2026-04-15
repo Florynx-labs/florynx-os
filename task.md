@@ -1,0 +1,9 @@
+- `[x]` Task 1: Pointer validation in `usermem.rs`
+  - `[ ]` Add `validate_user_ptr` function conforming to strict checks.
+  - `[ ]` Update `validate_user_range` and string validation to use this base helper.
+- `[x]` Task 2: Syscall structs protection
+  - `[ ]` Edit `shared/src/syscall_abi.rs` to insert explicit padding bytes and derive `Default`.
+  - `[ ]` Add `syscall_guard` to `handlers.rs`.
+  - `[ ]` Refactor ABI structs initialization in `handlers.rs`.
+- `[ ]` Task 3: Process Memory Cleanup
+  - `[ ]` Add L4-L1 mapping sweeps to `process.rs` to correctly free user frames during zombie reaping.

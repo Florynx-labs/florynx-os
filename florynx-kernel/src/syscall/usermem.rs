@@ -23,23 +23,28 @@ enum Access {
 }
 
 #[inline]
+pub fn validate_user_ptr(ptr: u64, len: u64) -> bool {
+    if ptr == 0 { return false; }
+    let end = match ptr.checked_add(len) {
+        Some(e) => e,
+        None => return false,
+    };
+    if !VirtAddr::try_new(ptr).is_ok() || (len > 0 && !VirtAddr::try_new(end - 1).is_ok()) {
+        return false;
+    }
+    if ptr > USER_MAX_VADDR || (len > 0 && (end - 1) > USER_MAX_VADDR) {
+        return false;
+    }
+    true
+}
+
+#[inline]
 fn validate_user_range(ptr: u64, len: u64, access: Access) -> Result<(), i64> {
-    if ptr == 0 {
+    if !validate_user_ptr(ptr, len) {
         return Err(EFAULT);
     }
     if len == 0 || len > MAX_SYSCALL_COPY {
         return Err(EINVAL);
-    }
-
-    let end = ptr.checked_add(len).ok_or(EFAULT)?;
-
-    // Require canonical addresses to avoid immediate #GP on access.
-    if !VirtAddr::try_new(ptr).is_ok() || !VirtAddr::try_new(end - 1).is_ok() {
-        return Err(EFAULT);
-    }
-    // Reject higher-half (kernel) virtual addresses.
-    if ptr > USER_MAX_VADDR || (end - 1) > USER_MAX_VADDR {
-        return Err(EFAULT);
     }
 
     validate_page_permissions(ptr, len, access)?;
@@ -142,12 +147,17 @@ fn validate_single_page(
 /// Returns `Err(EFAULT)` if the pointer is invalid, `Err(EINVAL)` if no NUL
 /// found within `max_len`.
 pub fn read_cstr_from_user(ptr: u64, max_len: usize) -> Result<alloc::string::String, i64> {
-    if ptr == 0 { return Err(EFAULT); }
-    if ptr > USER_MAX_VADDR { return Err(EFAULT); }
+    if !validate_user_ptr(ptr, 1) { return Err(EFAULT); }
+    
     let mut result = alloc::string::String::new();
     for i in 0..max_len {
         let addr = ptr.checked_add(i as u64).ok_or(EFAULT)?;
-        if addr > USER_MAX_VADDR { return Err(EFAULT); }
+        if !validate_user_ptr(addr, 1) { return Err(EFAULT); }
+        
+        // Check page permission for each byte (or optimized per page)
+        // For simplicity and safety in strings, we validate as we go.
+        validate_page_permissions(addr, 1, Access::Read)?;
+
         let byte = unsafe { *(addr as *const u8) };
         if byte == 0 { return Ok(result); }
         result.push(byte as char);

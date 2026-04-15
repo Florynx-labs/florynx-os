@@ -261,12 +261,6 @@ extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFr
     // Pump driver events → GUI event bus (try_lock, bounded, ISR-safe).
     crate::drivers::try_process_events();
 
-    // Frame-limited GUI redraw (~60 FPS at 200 Hz PIT = every 3 ticks).
-    static FRAME_TICK: AtomicU64 = AtomicU64::new(0);
-    if FRAME_TICK.fetch_add(1, Ordering::Relaxed) % 3 == 0 {
-        crate::gui::desktop::redraw_if_needed();
-    }
-
     // Send End-Of-Interrupt to the PIC
     unsafe {
         crate::interrupts::pic::PICS
