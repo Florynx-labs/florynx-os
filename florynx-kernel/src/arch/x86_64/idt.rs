@@ -50,7 +50,7 @@ lazy_static! {
         idt[InterruptIndex::Mouse.as_usize()].set_handler_fn(mouse_interrupt_handler);
         unsafe {
             idt[SYSCALL_VECTOR]
-                .set_handler_addr(VirtAddr::new(syscall_int80_stub as u64))
+                .set_handler_addr(VirtAddr::new(syscall_int80_stub as *const () as u64))
                 .set_privilege_level(PrivilegeLevel::Ring3);
         }
 
@@ -176,8 +176,9 @@ extern "x86-interrupt" fn page_fault_handler(
             error_code,
             stack_frame.instruction_pointer.as_u64()
         );
-        crate::process::scheduler::handle_user_page_fault(fault_addr, error_code.bits() as u64);
-        return;
+        // Process Isolation: Force the offending user thread to terminate immediately
+        // instead of returning and infinitely looping on the faulting instruction.
+        crate::process::scheduler::exit_with_code(139); // SIGSEGV
     }
 
     PAGE_FAULT_KERNEL.fetch_add(1, Ordering::Relaxed);

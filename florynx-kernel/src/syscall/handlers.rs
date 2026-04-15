@@ -67,7 +67,9 @@ pub fn sys_write(fd: u64, buf_ptr: u64, len: u64) -> i64 {
 /// fd=0: stdin (keyboard buffer)
 /// fd>=3: VFS file descriptor
 pub fn sys_read(fd: u64, buf_ptr: u64, len: u64) -> i64 {
-    let mut buf = alloc::vec![0u8; len as usize];
+    // SECURITY: Clamp read_len to a sane max (64KB) to prevent userland OOM DOS attacks
+    let read_len = core::cmp::min(len, 64 * 1024);
+    let mut buf = alloc::vec![0u8; read_len as usize];
 
     match fd {
         0 => {
@@ -267,6 +269,19 @@ pub fn sys_abi_info(out_ptr: u64, out_len: u64, _arg3: u64) -> i64 {
     if out_len < core::mem::size_of::<AbiInfoV1>() as u64 {
         return EINVAL;
     }
+    
+    // SECURITY: Read and validate the caller's struct header
+    let hdr_bytes = match usermem::copy_from_user(out_ptr, 4) {
+        Ok(b) => b,
+        Err(e) => return e,
+    };
+    let supplied_size = u16::from_ne_bytes([hdr_bytes[0], hdr_bytes[1]]);
+    let supplied_version = u16::from_ne_bytes([hdr_bytes[2], hdr_bytes[3]]);
+    
+    if supplied_version != ABI_V1 || supplied_size < core::mem::size_of::<AbiInfoV1>() as u16 {
+        return EINVAL;
+    }
+
     let info = AbiInfoV1 {
         hdr: AbiHeader {
             size: core::mem::size_of::<AbiInfoV1>() as u16,
@@ -294,6 +309,17 @@ pub fn sys_debug_telemetry(out_ptr: u64, out_len: u64, _arg3: u64) -> i64 {
     if out_len < core::mem::size_of::<KernelTelemetryV1>() as u64 {
         return EINVAL;
     }
+    
+    // SECURITY: Read and validate the caller's struct header
+    let hdr_bytes = match usermem::copy_from_user(out_ptr, 4) {
+        Ok(b) => b,
+        Err(e) => return e,
+    };
+    let supplied_version = u16::from_ne_bytes([hdr_bytes[2], hdr_bytes[3]]);
+    if supplied_version != ABI_V1 {
+        return EINVAL;
+    }
+
     let fault = crate::arch::x86_64::idt::fault_telemetry();
     let panic = crate::core_kernel::panic::panic_telemetry();
     let out = KernelTelemetryV1 {
@@ -346,6 +372,18 @@ pub fn sys_stat(path_ptr: u64, path_len: u64, stat_ptr: u64) -> i64 {
         Err(e) => return e,
     };
     
+    // SECURITY: Validate stat_ptr header
+    if stat_ptr != 0 {
+        let hdr_bytes = match usermem::copy_from_user(stat_ptr, 4) {
+            Ok(b) => b,
+            Err(_) => return EINVAL,
+        };
+        let supplied_version = u16::from_ne_bytes([hdr_bytes[2], hdr_bytes[3]]);
+        if supplied_version != ABI_V1 {
+            return EINVAL; // ABI mismatch
+        }
+    }
+
     let path = match core::str::from_utf8(&path_bytes) {
         Ok(s) => s,
         Err(_) => return EINVAL,

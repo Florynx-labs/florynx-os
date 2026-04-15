@@ -4,28 +4,10 @@
 // The central kernel initialization and orchestration module.
 // =============================================================================
 
-/// Display a kernel banner on the VGA screen.
+/// Display a kernel banner on the console.
 pub fn print_banner() {
-    use crate::drivers::display::vga::{Color, WRITER};
-    use core::fmt::Write;
-
-    let mut writer = WRITER.lock();
-
-    // Title in bright color
-    writer.set_color(Color::LightCyan, Color::Black);
-    let _ = write!(writer, "=== ");
-    writer.set_color(Color::Yellow, Color::Black);
-    let _ = write!(writer, "Florynx Kernel v0.1");
-    writer.set_color(Color::LightCyan, Color::Black);
-    let _ = writeln!(writer, " ===");
-
-    // Boot message
-    writer.set_color(Color::LightGreen, Color::Black);
-    let _ = writeln!(writer, "Florynx Kernel v0.1 boot successful");
-
-    // Reset to default
-    writer.set_color(Color::LightGreen, Color::Black);
-    let _ = writeln!(writer, "");
+    crate::println!("=== Florynx Kernel v0.4.5 ===");
+    crate::println!("Florynx Kernel boot successful\n");
 }
 
 /// Called after all subsystems are initialized.

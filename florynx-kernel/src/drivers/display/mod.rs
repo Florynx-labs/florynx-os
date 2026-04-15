@@ -2,6 +2,6 @@
 // Florynx Kernel — Display Drivers Module
 // =============================================================================
 
-pub mod vga;
 pub mod framebuffer;
 pub mod bga;
+

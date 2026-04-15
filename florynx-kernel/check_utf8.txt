@@ -1,0 +1,11 @@
+﻿cargo : error: unexpected argument '-W' found
+Au caractère Ligne:1 : 1
++ cargo check --lib -p florynx-kernel -- -W dead_code 2> check.txt
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (error: unexpected argument '-W' found:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+
+Usage: cargo.exe check [OPTIONS]
+
+For more information, try '--help'.

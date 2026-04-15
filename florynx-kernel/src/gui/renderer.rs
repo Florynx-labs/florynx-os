@@ -234,16 +234,27 @@ pub fn draw_vignette(fb: &mut FramebufferManager, strength: u8) {
     }
 }
 
-/// Draws a solid rectangle.
+/// Draws a solid rectangle (with alpha blending support).
 pub fn draw_rect(fb: &mut FramebufferManager, x: usize, y: usize, w: usize, h: usize, color: Color) {
     let (sw, sh) = fb.dimensions();
     let x1 = x.min(sw);
     let y1 = y.min(sh);
     let x2 = (x + w).min(sw);
     let y2 = (y + h).min(sh);
+    let a = color.a as u16;
+
     for py in y1..y2 {
         for px in x1..x2 {
-            fb.set_pixel(px, py, color.r, color.g, color.b);
+            if a == 255 {
+                fb.set_pixel(px, py, color.r, color.g, color.b);
+            } else if a > 0 {
+                let (br, bg, bb) = fb.get_pixel(px, py);
+                let inv_a = 255 - a;
+                let nr = ((color.r as u16 * a + br as u16 * inv_a) / 255) as u8;
+                let ng = ((color.g as u16 * a + bg as u16 * inv_a) / 255) as u8;
+                let nb = ((color.b as u16 * a + bb as u16 * inv_a) / 255) as u8;
+                fb.set_pixel(px, py, nr, ng, nb);
+            }
         }
     }
 }
@@ -263,15 +274,35 @@ pub fn draw_gradient_rect(fb: &mut FramebufferManager, x: usize, y: usize, w: us
 
 /// Draws a horizontal line.
 pub fn draw_hline(fb: &mut FramebufferManager, x: usize, y: usize, len: usize, color: Color) {
+    let a = color.a as u16;
     for dx in 0..len {
-        fb.set_pixel(x + dx, y, color.r, color.g, color.b);
+        if a == 255 {
+            fb.set_pixel(x + dx, y, color.r, color.g, color.b);
+        } else if a > 0 {
+            let (br, bg, bb) = fb.get_pixel(x + dx, y);
+            let inv_a = 255 - a;
+            let nr = ((color.r as u16 * a + br as u16 * inv_a) / 255) as u8;
+            let ng = ((color.g as u16 * a + bg as u16 * inv_a) / 255) as u8;
+            let nb = ((color.b as u16 * a + bb as u16 * inv_a) / 255) as u8;
+            fb.set_pixel(x + dx, y, nr, ng, nb);
+        }
     }
 }
 
 /// Draws a vertical line.
 pub fn draw_vline(fb: &mut FramebufferManager, x: usize, y: usize, len: usize, color: Color) {
+    let a = color.a as u16;
     for dy in 0..len {
-        fb.set_pixel(x, y + dy, color.r, color.g, color.b);
+        if a == 255 {
+            fb.set_pixel(x, y + dy, color.r, color.g, color.b);
+        } else if a > 0 {
+            let (br, bg, bb) = fb.get_pixel(x, y + dy);
+            let inv_a = 255 - a;
+            let nr = ((color.r as u16 * a + br as u16 * inv_a) / 255) as u8;
+            let ng = ((color.g as u16 * a + bg as u16 * inv_a) / 255) as u8;
+            let nb = ((color.b as u16 * a + bb as u16 * inv_a) / 255) as u8;
+            fb.set_pixel(x, y + dy, nr, ng, nb);
+        }
     }
 }
 
@@ -279,11 +310,26 @@ pub fn draw_vline(fb: &mut FramebufferManager, x: usize, y: usize, len: usize, c
 // Rounded rectangle
 // ---------------------------------------------------------------------------
 
-/// Draws a filled rounded rectangle.
+/// Draws a filled rounded rectangle with alpha blending support.
 pub fn draw_rounded_rect(fb: &mut FramebufferManager, x: usize, y: usize, w: usize, h: usize, r: usize, color: Color) {
-    if w == 0 || h == 0 { return; }
+    if w == 0 || h == 0 || color.a == 0 { return; }
     let r = r.min(w / 2).min(h / 2);
     let r2 = (r * r) as i32;
+    let a = color.a as u16;
+
+    // Helper closure for blending
+    let plot = |fb: &mut FramebufferManager, px: usize, py: usize| {
+        if a == 255 {
+            fb.set_pixel(px, py, color.r, color.g, color.b);
+        } else {
+            let (br, bg, bb) = fb.get_pixel(px, py);
+            let inv_a = 255 - a;
+            let nr = ((color.r as u16 * a + br as u16 * inv_a) / 255) as u8;
+            let ng = ((color.g as u16 * a + bg as u16 * inv_a) / 255) as u8;
+            let nb = ((color.b as u16 * a + bb as u16 * inv_a) / 255) as u8;
+            fb.set_pixel(px, py, nr, ng, nb);
+        }
+    };
 
     // Center band (full width, between corner rows)
     draw_rect(fb, x, y + r, w, h.saturating_sub(2 * r), color);
@@ -298,14 +344,10 @@ pub fn draw_rounded_rect(fb: &mut FramebufferManager, x: usize, y: usize, w: usi
             let dist = (r as i32 - 1 - dx as i32) * (r as i32 - 1 - dx as i32)
                      + (r as i32 - 1 - dy as i32) * (r as i32 - 1 - dy as i32);
             if dist <= r2 {
-                // Top-left
-                fb.set_pixel(x + dx, y + dy, color.r, color.g, color.b);
-                // Top-right
-                fb.set_pixel(x + w - 1 - dx, y + dy, color.r, color.g, color.b);
-                // Bottom-left
-                fb.set_pixel(x + dx, y + h - 1 - dy, color.r, color.g, color.b);
-                // Bottom-right
-                fb.set_pixel(x + w - 1 - dx, y + h - 1 - dy, color.r, color.g, color.b);
+                plot(fb, x + dx, y + dy);                       // Top-left
+                plot(fb, x + w - 1 - dx, y + dy);               // Top-right
+                plot(fb, x + dx, y + h - 1 - dy);               // Bottom-left
+                plot(fb, x + w - 1 - dx, y + h - 1 - dy);       // Bottom-right
             }
         }
     }
@@ -313,8 +355,23 @@ pub fn draw_rounded_rect(fb: &mut FramebufferManager, x: usize, y: usize, w: usi
 
 /// Draws a 1px rounded border (outline only).
 pub fn draw_rounded_border(fb: &mut FramebufferManager, x: usize, y: usize, w: usize, h: usize, r: usize, color: Color) {
-    if w < 2 || h < 2 { return; }
+    if w < 2 || h < 2 || color.a == 0 { return; }
     let r = r.min(w / 2).min(h / 2);
+    let a = color.a as u16;
+
+    // Helper closure for blending
+    let plot = |fb: &mut FramebufferManager, px: usize, py: usize| {
+        if a == 255 {
+            fb.set_pixel(px, py, color.r, color.g, color.b);
+        } else {
+            let (br, bg, bb) = fb.get_pixel(px, py);
+            let inv_a = 255 - a;
+            let nr = ((color.r as u16 * a + br as u16 * inv_a) / 255) as u8;
+            let ng = ((color.g as u16 * a + bg as u16 * inv_a) / 255) as u8;
+            let nb = ((color.b as u16 * a + bb as u16 * inv_a) / 255) as u8;
+            fb.set_pixel(px, py, nr, ng, nb);
+        }
+    };
 
     // Straight edges
     draw_hline(fb, x + r, y, w.saturating_sub(2 * r), color);
@@ -329,18 +386,15 @@ pub fn draw_rounded_border(fb: &mut FramebufferManager, x: usize, y: usize, w: u
         let mut cy: i32 = ri;
         let mut d: i32 = 1 - ri;
         while cx <= cy {
-            // top-left
-            fb.set_pixel(x + r - cx as usize, y + r - cy as usize, color.r, color.g, color.b);
-            fb.set_pixel(x + r - cy as usize, y + r - cx as usize, color.r, color.g, color.b);
-            // top-right
-            fb.set_pixel(x + w - 1 - r + cx as usize, y + r - cy as usize, color.r, color.g, color.b);
-            fb.set_pixel(x + w - 1 - r + cy as usize, y + r - cx as usize, color.r, color.g, color.b);
-            // bottom-left
-            fb.set_pixel(x + r - cx as usize, y + h - 1 - r + cy as usize, color.r, color.g, color.b);
-            fb.set_pixel(x + r - cy as usize, y + h - 1 - r + cx as usize, color.r, color.g, color.b);
-            // bottom-right
-            fb.set_pixel(x + w - 1 - r + cx as usize, y + h - 1 - r + cy as usize, color.r, color.g, color.b);
-            fb.set_pixel(x + w - 1 - r + cy as usize, y + h - 1 - r + cx as usize, color.r, color.g, color.b);
+            plot(fb, x + r - cx as usize, y + r - cy as usize);
+            plot(fb, x + r - cy as usize, y + r - cx as usize);
+            plot(fb, x + w - 1 - r + cx as usize, y + r - cy as usize);
+            plot(fb, x + w - 1 - r + cy as usize, y + r - cx as usize);
+            plot(fb, x + r - cx as usize, y + h - 1 - r + cy as usize);
+            plot(fb, x + r - cy as usize, y + h - 1 - r + cx as usize);
+            plot(fb, x + w - 1 - r + cx as usize, y + h - 1 - r + cy as usize);
+            plot(fb, x + w - 1 - r + cy as usize, y + h - 1 - r + cx as usize);
+            
             cx += 1;
             if d < 0 {
                 d += 2 * cx + 1;
@@ -403,6 +457,39 @@ pub fn draw_text(fb: &mut FramebufferManager, text: &str, px: usize, py: usize, 
         let c = if byte >= 0x20 && byte <= 0x7E { byte } else { b'?' };
         draw_char(fb, c, cx, py, color, s);
         cx += char_w;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Anti-aliased text rendering (proportional)
+// ---------------------------------------------------------------------------
+
+/// Font size selection for the AA text system.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FontSize {
+    /// ~8px cell height, proportional widths — used for content text, labels
+    Normal,
+    /// ~16px cell height (2× scaled + AA) — used for titlebar text, headings
+    Title,
+}
+
+/// Draw anti-aliased proportional text. Dispatches to the appropriate font size.
+pub fn draw_text_aa(fb: &mut FramebufferManager, text: &str, px: usize, py: usize, color: Color, size: FontSize) {
+    match size {
+        FontSize::Normal => {
+            crate::gui::font_data::draw_aa_normal(fb, text, px, py, color);
+        }
+        FontSize::Title => {
+            crate::gui::font_data::draw_aa_title(fb, text, px, py, color);
+        }
+    }
+}
+
+/// Measure text width in pixels for the given font size.
+pub fn measure_text_aa(text: &str, size: FontSize) -> usize {
+    match size {
+        FontSize::Normal => crate::gui::font_data::measure_normal(text),
+        FontSize::Title => crate::gui::font_data::measure_title(text),
     }
 }
 
@@ -559,8 +646,8 @@ pub fn redraw_cursor_on(fb: &mut FramebufferManager, x: usize, y: usize) {
     };
     
     // First restore the old cursor area to prevent ghost cursors
-    let old_x = backup.x;
-    let old_y = backup.y;
+    let _old_x = backup.x;
+    let _old_y = backup.y;
     if backup.valid {
         restore_under_cursor(fb, &backup);
         // No need to flush here - caller handles framebuffer flushing

@@ -1,6 +1,6 @@
 [package]
 name = "florynx-userland"
-version = "0.4.5"
+version = "0.4.8"
 edition = "2021"
 description = "FlorynxOS userland — KDE Plasma-inspired desktop shell"
 

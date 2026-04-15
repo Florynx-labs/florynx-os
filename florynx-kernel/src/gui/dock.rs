@@ -11,8 +11,8 @@ use crate::gui::icons::{self, Icon};
 use crate::gui::animation::AnimatedScale;
 
 const MAX_ITEMS: usize = 10;
-const ICON_SIZE: usize = 36;
-const ICON_GAP: usize = 10;
+const ICON_SIZE: usize = 48;
+const ICON_GAP: usize = 16;
 const HOVER_SCALE: f32 = 1.25;
 const NORMAL_SCALE: f32 = 1.0;
 const SCALE_SPEED: f32 = 0.18;
@@ -79,9 +79,11 @@ impl Dock {
         let t = &theme::DARK;
         let dr = self.dock_rect(screen_w, screen_h);
 
-        // Dock background (rounded, semi-transparent dark)
-        renderer::draw_rounded_rect(fb, dr.x, dr.y, dr.w, dr.h, 14, t.dock_bg);
-        renderer::draw_rounded_border(fb, dr.x, dr.y, dr.w, dr.h, 14, t.border);
+        // Glassy dock background
+        // First draw a dark sheer layer, then the frosty theme layer
+        renderer::draw_rounded_rect(fb, dr.x, dr.y, dr.w, dr.h, 18, Color::rgba(0, 0, 0, 80));
+        renderer::draw_rounded_rect(fb, dr.x, dr.y, dr.w, dr.h, 18, t.dock_bg);
+        renderer::draw_rounded_border(fb, dr.x, dr.y, dr.w, dr.h, 18, t.border);
 
         // Icons with scale animation
         for i in 0..self.count {

@@ -34,7 +34,7 @@ pub fn ease_in_out(t: f32) -> f32 {
 // ---------------------------------------------------------------------------
 
 /// Threshold below which we snap to target (prevents infinite asymptotic approach).
-const SNAP_THRESHOLD: f32 = 0.5;
+const SNAP_THRESHOLD: f32 = 0.005;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Animation {
@@ -209,5 +209,46 @@ impl AnimatedScale {
     /// Compute a scaled size from a base size.
     pub fn apply(&self, base: usize) -> usize {
         (base as f32 * self.scale.current) as usize
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Size animation (for smooth window resize)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy)]
+pub struct AnimatedSize {
+    pub w: Animation,
+    pub h: Animation,
+}
+
+impl AnimatedSize {
+    pub const fn new(w: f32, h: f32, speed: f32) -> Self {
+        AnimatedSize {
+            w: Animation::new(w, speed),
+            h: Animation::new(h, speed),
+        }
+    }
+
+    /// Advance both axes. Returns true if either changed.
+    #[inline]
+    pub fn tick(&mut self) -> bool {
+        let cw = self.w.tick();
+        let ch = self.h.tick();
+        cw || ch
+    }
+
+    pub fn set_target(&mut self, w: f32, h: f32) {
+        self.w.set_target(w);
+        self.h.set_target(h);
+    }
+
+    pub fn snap(&mut self, w: f32, h: f32) {
+        self.w.snap(w);
+        self.h.snap(h);
+    }
+
+    pub fn is_animating(&self) -> bool {
+        self.w.is_animating() || self.h.is_animating()
     }
 }

@@ -110,22 +110,20 @@ impl TextEditor {
         match *event {
             Event::KeyPress { key } => {
                 match key {
-                    Key::Char(c) => {
-                        if self.cursor_line < self.lines.len() {
-                            let line_len = self.line_lens[self.cursor_line];
-                            if line_len < MAX_LINE_LEN {
-                                // Insert character at cursor
-                                if self.cursor_col < line_len {
-                                    // Shift text right
-                                    for i in (self.cursor_col..line_len).rev() {
-                                        self.lines[self.cursor_line][i + 1] = self.lines[self.cursor_line][i];
-                                    }
+                    Key::Char(c) if self.cursor_line < self.lines.len() => {
+                        let line_len = self.line_lens[self.cursor_line];
+                        if line_len < MAX_LINE_LEN {
+                            // Insert character at cursor
+                            if self.cursor_col < line_len {
+                                // Shift text right
+                                for i in (self.cursor_col..line_len).rev() {
+                                    self.lines[self.cursor_line][i + 1] = self.lines[self.cursor_line][i];
                                 }
-                                self.lines[self.cursor_line][self.cursor_col] = c as u8;
-                                self.line_lens[self.cursor_line] += 1;
-                                self.cursor_col += 1;
-                                return true;
                             }
+                            self.lines[self.cursor_line][self.cursor_col] = c as u8;
+                            self.line_lens[self.cursor_line] += 1;
+                            self.cursor_col += 1;
+                            return true;
                         }
                     }
                     Key::Backspace => {
@@ -157,28 +155,26 @@ impl TextEditor {
                             }
                         }
                     }
-                    Key::Enter => {
+                    Key::Enter if self.lines.len() < MAX_LINES => {
                         // Create new line
-                        if self.lines.len() < MAX_LINES {
-                            let curr_len = self.line_lens[self.cursor_line];
-                            let mut new_line = [0u8; MAX_LINE_LEN];
-                            let mut new_len = 0;
+                        let curr_len = self.line_lens[self.cursor_line];
+                        let mut new_line = [0u8; MAX_LINE_LEN];
+                        let mut new_len = 0;
 
-                            // Move text after cursor to new line
-                            if self.cursor_col < curr_len {
-                                for i in self.cursor_col..curr_len {
-                                    new_line[i - self.cursor_col] = self.lines[self.cursor_line][i];
-                                }
-                                new_len = curr_len - self.cursor_col;
-                                self.line_lens[self.cursor_line] = self.cursor_col;
+                        // Move text after cursor to new line
+                        if self.cursor_col < curr_len {
+                            for i in self.cursor_col..curr_len {
+                                new_line[i - self.cursor_col] = self.lines[self.cursor_line][i];
                             }
-
-                            self.cursor_line += 1;
-                            self.lines.insert(self.cursor_line, new_line);
-                            self.line_lens.insert(self.cursor_line, new_len);
-                            self.cursor_col = 0;
-                            return true;
+                            new_len = curr_len - self.cursor_col;
+                            self.line_lens[self.cursor_line] = self.cursor_col;
                         }
+
+                        self.cursor_line += 1;
+                        self.lines.insert(self.cursor_line, new_line);
+                        self.line_lens.insert(self.cursor_line, new_len);
+                        self.cursor_col = 0;
+                        return true;
                     }
                     Key::ArrowLeft => {
                         if self.cursor_col > 0 {
@@ -196,17 +192,13 @@ impl TextEditor {
                             self.cursor_col = 0;
                         }
                     }
-                    Key::ArrowUp => {
-                        if self.cursor_line > 0 {
-                            self.cursor_line -= 1;
-                            self.cursor_col = self.cursor_col.min(self.line_lens[self.cursor_line]);
-                        }
+                    Key::ArrowUp if self.cursor_line > 0 => {
+                        self.cursor_line -= 1;
+                        self.cursor_col = self.cursor_col.min(self.line_lens[self.cursor_line]);
                     }
-                    Key::ArrowDown => {
-                        if self.cursor_line < self.lines.len() - 1 {
-                            self.cursor_line += 1;
-                            self.cursor_col = self.cursor_col.min(self.line_lens[self.cursor_line]);
-                        }
+                    Key::ArrowDown if self.cursor_line < self.lines.len() - 1 => {
+                        self.cursor_line += 1;
+                        self.cursor_col = self.cursor_col.min(self.line_lens[self.cursor_line]);
                     }
                     Key::Home => {
                         self.cursor_col = 0;

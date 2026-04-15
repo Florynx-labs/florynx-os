@@ -1,6 +1,6 @@
 [package]
 name = "florynx-kernel"
-version = "0.4.5"
+version = "0.4.8"
 edition = "2021"
 authors = ["Florynx OS Team"]
 description = "Florynx Kernel - Production-level x86_64 OS with GUI, exception handling, and VFS"

@@ -47,9 +47,15 @@ fn panic(info: &PanicInfo) -> ! {
     crate::serial_println!("!!! KERNEL PANIC !!!");
     crate::serial_println!("{}", info);
 
-    // Also try to print to VGA text mode
+    // Print to console (if active and not deadlocked)
     crate::println!("!!! KERNEL PANIC !!!");
     crate::println!("{}", info);
+
+    // Force unlock the framebuffer so we can guarantee the red screen of death appears
+    // even if the panic occurred inside GUI rendering.
+    unsafe {
+        crate::gui::renderer::FRAMEBUFFER.force_unlock();
+    }
 
     // Draw panic message to framebuffer if available (visible in GUI mode)
     draw_panic_to_framebuffer(info);

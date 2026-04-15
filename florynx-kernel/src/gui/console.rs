@@ -193,3 +193,20 @@ pub fn _print(args: fmt::Arguments) {
     let mut writer = ConsoleWriter { console: con, fb };
     let _ = writer.write_fmt(args);
 }
+
+// ---------------------------------------------------------------------------
+// Print macros
+// ---------------------------------------------------------------------------
+
+/// Print formatted text to the console (framebuffer).
+#[macro_export]
+macro_rules! print {
+    ($($arg:tt)*) => ($crate::gui::console::_print(format_args!($($arg)*)));
+}
+
+/// Print formatted text to the console (framebuffer), followed by a newline.
+#[macro_export]
+macro_rules! println {
+    () => ($crate::print!("\n"));
+    ($($arg:tt)*) => ($crate::print!("{}\n", format_args!($($arg)*)));
+}

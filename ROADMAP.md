@@ -110,7 +110,7 @@ This document maps out the gap between the current FlorynxOS microkernel and a f
 - [ ] Parse ELF64 headers
 - [ ] Load `.text`, `.data`, `.bss` segments into user address space
 - [ ] Dynamic linking support (`ld.so`, `.so` loading)
-- [ ] `execve` syscall
+- [x] `execve` syscall (flat-binary loader at 0x400000)
 
 ### 4.3 Shell
 - [ ] Interactive command-line shell (`florsh`)
@@ -217,7 +217,7 @@ This document maps out the gap between the current FlorynxOS microkernel and a f
 
 | Priority | Items |
 |----------|-------|
-| **P0 — Now** | Context switching, idle-task event pump, persistent FS, ELF loader, shell |
+| **P0 — Now** | ELF64 loader (proper segments), shell (`florsh`), idle-task event pump, FAT32 write |
 | **P1 — Near** | UEFI boot, networking, libc, core utils, font rendering |
 | **P2 — Mid** | USB, audio, SMP, window resize, terminal emulator, settings |
 | **P3 — Later** | ASLR, installer, package manager, multi-monitor, web browser |
