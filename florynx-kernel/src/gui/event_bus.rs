@@ -205,6 +205,31 @@ pub fn push_user_window_destroyed(win_id: u32) {
     }
 }
 
+/// Event type 5: window focused.
+pub fn push_user_window_focused(win_id: u32) {
+    // [type:8][win_id:16]
+    let packed = (5u64 << 56) | (((win_id as u64) & 0xFFFF) << 40);
+    if let Some(mut q) = USER_EVENT_QUEUE.try_lock() {
+        q.push(packed);
+    } else {
+        USER_DROPPED.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+/// Event type 6: window resized.
+pub fn push_user_window_resized(win_id: u32, w: u16, h: u16) {
+    // [type:8][win_id:16][w:16][h:16]
+    let packed = (6u64 << 56)
+        | (((win_id as u64) & 0xFFFF) << 40)
+        | ((w as u64) << 16)
+        | (h as u64);
+    if let Some(mut q) = USER_EVENT_QUEUE.try_lock() {
+        q.push(packed);
+    } else {
+        USER_DROPPED.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
 pub fn pop_user_event() -> Option<u64> {
     let mut q = USER_EVENT_QUEUE.lock();
     q.pop()

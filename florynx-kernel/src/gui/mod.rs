@@ -15,6 +15,8 @@ pub mod renderer;
 pub mod theme;
 pub mod event;
 pub mod animation;
+pub mod font;
+pub mod font_data;
 pub mod window;
 pub mod dock;
 pub mod desktop;

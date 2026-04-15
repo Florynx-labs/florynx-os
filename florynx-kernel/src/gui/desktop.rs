@@ -183,12 +183,41 @@ impl WindowManager {
         false
     }
 
+    /// Check if any window is being resized.
+    fn any_resizing(&self) -> bool {
+        for i in 0..self.count {
+            let slot = self.order[i];
+            if let Some(ref w) = self.windows[slot] {
+                if w.is_resizing() { return true; }
+            }
+        }
+        false
+    }
+
+    /// Check if any window is being dragged OR resized.
+    fn any_interactive(&self) -> bool {
+        self.any_dragging() || self.any_resizing()
+    }
+
     /// Get the bounds (including shadow) of the currently dragged window, if any.
     fn dragged_bounds_with_shadow(&self) -> Option<Rect> {
         for i in 0..self.count {
             let slot = self.order[i];
             if let Some(ref w) = self.windows[slot] {
                 if w.is_dragging() {
+                    return Some(w.bounds_with_shadow());
+                }
+            }
+        }
+        None
+    }
+
+    /// Get the bounds of the currently resized window, if any.
+    fn resized_bounds_with_shadow(&self) -> Option<Rect> {
+        for i in 0..self.count {
+            let slot = self.order[i];
+            if let Some(ref w) = self.windows[slot] {
+                if w.is_resizing() {
                     return Some(w.bounds_with_shadow());
                 }
             }
@@ -247,6 +276,15 @@ impl WindowManager {
 
 const MAX_DIRTY: usize = 32;
 
+/// Snap zones for window edge-snapping.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SnapZone {
+    None,
+    Left,
+    Right,
+    Maximize,
+}
+
 pub struct Desktop {
     wm: WindowManager,
     dock: Dock,
@@ -263,6 +301,8 @@ pub struct Desktop {
     /// Dirty rectangles for partial redraw (avoids full-screen blit on drag).
     dirty: [Rect; MAX_DIRTY],
     dirty_count: usize,
+    /// Current snap preview zone (shown as semi-transparent overlay).
+    snap_preview: SnapZone,
 }
 
 impl Desktop {
@@ -295,6 +335,7 @@ impl Desktop {
             bg_cached: false,
             dirty: [Rect::new(0, 0, 0, 0); MAX_DIRTY],
             dirty_count: 0,
+            snap_preview: SnapZone::None,
         }
     }
 
@@ -384,6 +425,9 @@ impl Desktop {
         self.wm.draw(fb);
         self.dock.draw(fb, self.screen_w, self.screen_h);
         self.menubar.draw(fb);
+
+        // Draw snap preview overlay if active
+        self.draw_snap_preview(fb);
 
         // Flush entire back buffer to VRAM in one shot
         fb.flush_full();
@@ -510,14 +554,66 @@ impl Desktop {
 
         if left_now && !left_was {
             let ev = Event::MouseDown { x, y, button: MouseButton::Left };
-            
+
             // Check dock first
             if let Some(icon_idx) = self.dock.handle_event(&ev, self.screen_w, self.screen_h) {
-                // Dock icon clicked - create window based on icon
                 self.on_dock_click(icon_idx);
                 return;
             }
-            
+
+            // Check traffic-light buttons BEFORE general window event dispatch
+            if let Some(active_slot) = self.wm.active {
+                let mut action: Option<u8> = None; // 0=close, 1=minimize, 2=maximize
+                if let Some(ref w) = self.wm.windows[active_slot] {
+                    if w.close_button_hit(x, y) {
+                        action = Some(0);
+                    } else if w.minimize_button_hit(x, y) {
+                        action = Some(1);
+                    } else if w.maximize_button_hit(x, y) {
+                        action = Some(2);
+                    }
+                }
+                match action {
+                    Some(0) => {
+                        // Close window
+                        let win_id = self.wm.windows[active_slot].as_ref().map(|w| w.id).unwrap_or(0);
+                        if let Some(bounds) = self.wm.remove_window_by_id(win_id) {
+                            self.mark_dirty(bounds);
+                            self.needs_full_redraw = true;
+                            crate::gui::event_bus::push_user_window_destroyed(win_id as u32);
+                        }
+                        self.sync_menubar_title();
+                        return;
+                    }
+                    Some(1) => {
+                        // Minimize: toggle visibility
+                        if let Some(ref mut w) = self.wm.windows[active_slot] {
+                            let bounds = w.bounds_with_shadow();
+                            w.visible = !w.visible;
+                            w.mark_dirty();
+                            self.mark_dirty(bounds);
+                            self.needs_full_redraw = true;
+                        }
+                        return;
+                    }
+                    Some(2) => {
+                        // Maximize/restore
+                        let sw = self.screen_w;
+                        let sh = self.screen_h;
+                        if let Some(ref mut w) = self.wm.windows[active_slot] {
+                            let old_bounds = w.bounds_with_shadow();
+                            w.toggle_maximize(sw, sh);
+                            let new_bounds = w.bounds_with_shadow();
+                            self.mark_dirty(old_bounds);
+                            self.mark_dirty(new_bounds);
+                            self.needs_full_redraw = true;
+                        }
+                        return;
+                    }
+                    _ => {}
+                }
+            }
+
             // Check windows — if a click brings a window to front, dirty all overlapping areas
             let old_active = self.wm.active;
             if self.wm.handle_event(&ev, self.screen_w, self.screen_h) {
@@ -532,6 +628,10 @@ impl Desktop {
                         if let Some(ref w) = self.wm.windows[new_idx] {
                             self.mark_dirty(w.bounds_with_shadow());
                         }
+                        // Emit focus event to userland
+                        if let Some(ref w) = self.wm.windows[new_idx] {
+                            crate::gui::event_bus::push_user_window_focused(w.id as u32);
+                        }
                     }
                     self.sync_menubar_title();
                 }
@@ -539,6 +639,34 @@ impl Desktop {
         }
 
         if !left_now && left_was {
+            // On mouse-up: check if we were dragging and should snap
+            if self.wm.any_dragging() && self.snap_preview != SnapZone::None {
+                // Apply snap to the dragged window
+                let sw = self.screen_w;
+                let sh = self.screen_h;
+                let snap = self.snap_preview;
+                for i in 0..self.wm.count {
+                    let slot = self.wm.order[i];
+                    if let Some(ref mut w) = self.wm.windows[slot] {
+                        if w.is_dragging() {
+                            let old_b = w.bounds_with_shadow();
+                            match snap {
+                                SnapZone::Left => w.snap_half(true, sw, sh),
+                                SnapZone::Right => w.snap_half(false, sw, sh),
+                                SnapZone::Maximize => w.toggle_maximize(sw, sh),
+                                SnapZone::None => {}
+                            }
+                            let new_b = w.bounds_with_shadow();
+                            self.mark_dirty(old_b);
+                            self.mark_dirty(new_b);
+                            self.needs_full_redraw = true;
+                            break;
+                        }
+                    }
+                }
+                self.snap_preview = SnapZone::None;
+            }
+
             let ev = Event::MouseUp { x, y, button: MouseButton::Left };
             self.wm.handle_event(&ev, self.screen_w, self.screen_h);
         }
@@ -554,30 +682,81 @@ impl Desktop {
             self.mouse_y = y;
             let ev = Event::MouseMove { x, y };
 
-            if self.wm.any_dragging() {
+            if self.wm.any_interactive() {
                 // Save old window bounds BEFORE the move
-                let old_bounds = self.wm.dragged_bounds_with_shadow();
+                let old_drag_bounds = self.wm.dragged_bounds_with_shadow();
+                let old_resize_bounds = self.wm.resized_bounds_with_shadow();
 
-                // Process the drag (moves the window)
+                // Process the move (updates window position or size)
                 self.wm.handle_event(&ev, self.screen_w, self.screen_h);
 
                 // Mark old position + new position as dirty
-                if let Some(old_r) = old_bounds {
+                if let Some(old_r) = old_drag_bounds {
                     self.mark_dirty(old_r);
                 }
                 if let Some(new_r) = self.wm.dragged_bounds_with_shadow() {
                     self.mark_dirty(new_r);
+                }
+                if let Some(old_r) = old_resize_bounds {
+                    self.mark_dirty(old_r);
+                }
+                if let Some(new_r) = self.wm.resized_bounds_with_shadow() {
+                    self.mark_dirty(new_r);
+                }
+
+                // Snap zone detection during drag
+                if self.wm.any_dragging() {
+                    let old_snap = self.snap_preview;
+                    self.snap_preview = if x <= 2 {
+                        SnapZone::Left
+                    } else if x >= self.screen_w.saturating_sub(3) {
+                        SnapZone::Right
+                    } else if y <= 2 {
+                        SnapZone::Maximize
+                    } else {
+                        SnapZone::None
+                    };
+                    if self.snap_preview != old_snap {
+                        // Dirty the snap preview area
+                        self.needs_full_redraw = true;
+                    }
                 }
             } else {
                 // Update dock hover state
                 let old_hovered = self.dock.hovered;
                 self.dock.handle_event(&ev, self.screen_w, self.screen_h);
                 if self.dock.hovered != old_hovered {
-                    // Dock hover changed — mark dock area dirty
                     let dock_y = self.screen_h.saturating_sub(theme::DARK.dock_h + theme::DARK.dock_margin + 10);
                     self.mark_dirty(Rect::new(0, dock_y, self.screen_w, self.screen_h - dock_y));
                 }
             }
+        }
+    }
+
+    /// Draw snap preview overlay.
+    fn draw_snap_preview(&self, fb: &mut FramebufferManager) {
+        if self.snap_preview == SnapZone::None { return; }
+
+        let menu_h = theme::DARK.menubar_h;
+        let dock_h = theme::DARK.dock_h + theme::DARK.dock_margin + 10;
+        let usable_h = self.screen_h.saturating_sub(menu_h + dock_h);
+        let accent = theme::DARK.accent;
+        let preview_color = Color::rgba(accent.r, accent.g, accent.b, 40);
+
+        match self.snap_preview {
+            SnapZone::Left => {
+                renderer::draw_rounded_rect(fb, 4, menu_h + 4,
+                    self.screen_w / 2 - 8, usable_h - 8, 12, preview_color);
+            }
+            SnapZone::Right => {
+                renderer::draw_rounded_rect(fb, self.screen_w / 2 + 4, menu_h + 4,
+                    self.screen_w / 2 - 8, usable_h - 8, 12, preview_color);
+            }
+            SnapZone::Maximize => {
+                renderer::draw_rounded_rect(fb, 4, menu_h + 4,
+                    self.screen_w - 8, usable_h - 8, 12, preview_color);
+            }
+            SnapZone::None => {}
         }
     }
 
