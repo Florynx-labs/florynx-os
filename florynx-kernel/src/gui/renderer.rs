@@ -501,14 +501,20 @@ pub fn draw_text_aa(fb: &mut FramebufferManager, text: &str, px: usize, py: usiz
         if let Some(outline) = scaled_font.outline_glyph(glyph) {
             let bounds = outline.px_bounds();
             outline.draw(|x, y, coverage| {
-                let sx = (x as f32 + bounds.min.x) as usize;
-                let sy = (y as f32 + bounds.min.y) as usize;
+                let gx = x as f32 + bounds.min.x;
+                let gy = y as f32 + bounds.min.y;
                 
-                if coverage > 0.0 {
-                    let alpha = (coverage * 255.0) as u8;
-                    let (bg_r, bg_g, bg_b) = fb.get_pixel(sx, sy);
-                    let (nr, ng, nb) = crate::gui::font::alpha_blend(color, bg_r, bg_g, bg_b, alpha);
-                    fb.set_pixel(sx, sy, nr, ng, nb);
+                if gx >= 0.0 && gy >= 0.0 && coverage > 0.0 {
+                    let sx = gx as usize;
+                    let sy = gy as usize;
+                    let (sw, sh) = fb.dimensions();
+                    
+                    if sx < sw && sy < sh {
+                        let alpha = (coverage * 255.0) as u8;
+                        let (bg_r, bg_g, bg_b) = fb.get_pixel(sx, sy);
+                        let (nr, ng, nb) = crate::gui::font::alpha_blend(color, bg_r, bg_g, bg_b, alpha);
+                        fb.set_pixel(sx, sy, nr, ng, nb);
+                    }
                 }
             });
         }

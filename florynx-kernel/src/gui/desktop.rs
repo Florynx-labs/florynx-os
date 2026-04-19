@@ -323,9 +323,8 @@ impl Desktop {
         let mut menubar = MenuBar::new(screen_w);
         menubar.set_title("FlorynxOS");
 
-        // Pre-allocate background cache to the exact size to avoid mid-render reallocs
-        let mut bg_cache = Vec::with_capacity(screen_w * screen_h * 3);
-        unsafe { bg_cache.set_len(screen_w * screen_h * 3); }
+        // Allocate background cache to the exact size
+        let bg_cache = alloc::vec![0u8; screen_w * screen_h * 3];
 
         Desktop {
             wm: WindowManager::new(),

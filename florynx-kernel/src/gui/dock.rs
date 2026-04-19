@@ -108,12 +108,8 @@ impl Dock {
             let sx = ir.x.saturating_sub(offset);
             let sy = ir.y.saturating_sub(offset);
 
-            // Removed solid rounded rect, letting PNG handle its own visuals/shadows
-            // Draw icon centered in scaled rect
-            let icon_x = sx + (scaled_size.saturating_sub(item.icon.width)) / 2;
-            let icon_y = sy + (scaled_size.saturating_sub(item.icon.height)) / 2;
-            
-            item.icon.draw_scaled(fb, icon_x, icon_y, scale);
+            // Center icon in scaled rect and draw it scaled to fill the slot
+            item.icon.draw_scaled(fb, sx, sy, scaled_size, scaled_size);
 
             // Active indicator dot below icon
             if item.active {

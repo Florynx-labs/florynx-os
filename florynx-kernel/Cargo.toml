@@ -20,6 +20,7 @@ florynx-shared = { path = "../shared" }
 # GUI enhancements for TTF & PNG (Hybrid Architecture)
 ab_glyph = { version = "0.2", default-features = false, features = ["libm"] }
 png-decoder = "0.2.0"
+libm = "0.2.11"
 
 [profile.dev]
 panic = "abort"

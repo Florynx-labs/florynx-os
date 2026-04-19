@@ -84,6 +84,7 @@ dependencies = [
  "bootloader",
  "florynx-shared",
  "lazy_static",
+ "libm",
  "linked_list_allocator",
  "pc-keyboard",
  "pic8259",

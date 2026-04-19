@@ -13,8 +13,8 @@ use x86_64::VirtAddr;
 
 /// Start address of the kernel heap (chosen to be in a high unmapped region).
 pub const HEAP_START: usize = 0x_4444_4444_0000;
-/// Size of the kernel heap: 16 MiB (double buffer ~3 MiB + bg cache ~2.3 MiB + general).
-pub const HEAP_SIZE: usize = 16 * 1024 * 1024;
+/// Size of the kernel heap: 32 MiB (safe margin for TTF, PNG, and double buffering).
+pub const HEAP_SIZE: usize = 32 * 1024 * 1024;
 
 /// Global kernel heap allocator (linked-list based).
 #[global_allocator]
