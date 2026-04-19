@@ -1,6 +1,7 @@
-# FlorynxOS Roadmap — From Microkernel to Everyday OS
+# FlorynxOS Roadmap — From Hybrid Kernel to Everyday OS
 
-This document maps out the gap between the current FlorynxOS microkernel and a fully usable, installable operating system that anyone could use daily.
+This document maps out the gap between the current FlorynxOS foundation and a fully usable, high-performance hybrid operating system. 
+By combining the stability of a micro-kernel with the raw speed of monolithic drivers (for gaming and heavy I/O), FlorynxOS aims for uncompromising UI fluidity.
 
 ---
 
@@ -130,7 +131,7 @@ This document maps out the gap between the current FlorynxOS microkernel and a f
 ## Phase 5 — GUI Maturity
 
 ### 5.1 Font Rendering
-- [ ] TrueType / bitmap font parser (PSF2 or BDF for simplicity)
+- [ ] TrueType / OpenType font parser (via `ab_glyph` or `fontdue` no_std for high-quality TTF/OTF)
 - [ ] Variable-width font support
 - [ ] Anti-aliased text rendering
 - [ ] Font size selection
@@ -138,9 +139,9 @@ This document maps out the gap between the current FlorynxOS microkernel and a f
 ### 5.2 Compositor Improvements
 - [x] Per-pixel alpha blending mechanics (`Color::rgba` / Frosty blur logic)
 - [x] Phase 4 GUI Integrations (Interactive Shell, Menubar, Dynamic Dock)
-- [ ] Render API Optimizations (Hardware blitting, partial compositing upgrades)
-- [ ] TrueType Font (TTF) Rendering Engine & Advanced Typography
-- [ ] PNG Decoder for High-Res Custom Icons & Wallpapers
+- [ ] Render API Optimizations (Hardware blitting, partial compositing upgrades in Ring 0 for Speed)
+- [ ] TrueType Font (TTF) Rendering Engine & Advanced Typography (via `ab_glyph`)
+- [ ] PNG Decoder for High-Res Custom Icons & Wallpapers (via `png` crate no_std)
 
 ### 5.3 Widget Toolkit
 - [ ] Scrollbar, checkbox, radio button, dropdown
@@ -224,4 +225,4 @@ This document maps out the gap between the current FlorynxOS microkernel and a f
 
 ---
 
-*Last updated: FlorynxOS v0.4.7 "Vortex" — Phase 1.3 fork+execve + Phase 2.1/2.2*
+*Last updated: FlorynxOS v0.4.8 — Pivot to Hybrid Kernel Architecture (High Performance + TrueType / PNG Pipeline)*

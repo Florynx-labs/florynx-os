@@ -10,7 +10,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/arch-x86__64-blue" alt="arch" />
   <img src="https://img.shields.io/badge/lang-Rust%20nightly-orange" alt="lang" />
-  <img src="https://img.shields.io/badge/version-0.4.7-cyan" alt="version" />
+  <img src="https://img.shields.io/badge/version-0.5.0-cyan" alt="version" />
   <img src="https://img.shields.io/badge/features-108-brightgreen" alt="features" />
 </p>
 

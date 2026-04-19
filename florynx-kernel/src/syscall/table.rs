@@ -70,3 +70,7 @@ pub const SYS_GUI_POLL_EVENT: u64 = 0x1004;
 pub const SYS_GUI_SET_WALLPAPER: u64 = 0x1005;
 pub const SYS_GUI_INVALIDATE: u64 = 0x1006;
 pub const SYS_GUI_FOCUS_WINDOW: u64 = 0x1007;
+
+/// Blit an entire RGBA frame/buffer from Userland directly to the Kernel Window frame.
+/// Extremely high-performance shortcut for games and rich apps.
+pub const SYS_GUI_BLIT_BUFFER: u64 = 0x1008;

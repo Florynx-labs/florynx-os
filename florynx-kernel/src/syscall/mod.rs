@@ -34,6 +34,7 @@ fn required_capability(syscall_num: u64) -> Option<Capability> {
         | table::SYS_GUI_POLL_EVENT
         | table::SYS_GUI_SET_WALLPAPER
         | table::SYS_GUI_INVALIDATE
+        | table::SYS_GUI_BLIT_BUFFER
         | table::SYS_GUI_FOCUS_WINDOW => Some(Capability::GUI_WINDOW),
         table::SYS_ABI_INFO
         | table::SYS_YIELD
@@ -88,6 +89,7 @@ pub fn dispatch(syscall_num: u64, arg1: u64, arg2: u64, arg3: u64) -> i64 {
         table::SYS_GUI_POLL_EVENT => handlers::sys_gui_poll_event(arg1, arg2, arg3),
         table::SYS_GUI_SET_WALLPAPER => handlers::sys_gui_set_wallpaper(arg1, arg2, arg3),
         table::SYS_GUI_INVALIDATE => handlers::sys_gui_invalidate(arg1, arg2, arg3),
+        table::SYS_GUI_BLIT_BUFFER => handlers::sys_gui_blit_buffer(arg1, arg2, arg3),
         table::SYS_GUI_FOCUS_WINDOW => handlers::sys_gui_focus_window(arg1, arg2, arg3),
         table::SYS_CLOCK_GETTIME => handlers::sys_clock_gettime(arg1, arg2, arg3),
         table::SYS_FORK   => handlers::sys_fork(),

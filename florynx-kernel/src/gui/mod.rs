@@ -16,7 +16,6 @@ pub mod theme;
 pub mod event;
 pub mod animation;
 pub mod font;
-pub mod font_data;
 pub mod window;
 pub mod dock;
 pub mod desktop;
@@ -24,7 +23,8 @@ pub mod event_bus;
 pub mod console;
 pub mod splash;
 pub mod hgui_link;
-pub mod icons;
+pub mod icons; // legacy monochromatic fallback icons
+pub mod dynamic_icon; // new PNG hardware-like fast blitting layer
 pub mod widgets;
 pub mod text_editor;
 pub mod menubar;

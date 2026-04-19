@@ -13,8 +13,8 @@ use x86_64::VirtAddr;
 /// IST index for the double-fault handler stack.
 pub const DOUBLE_FAULT_IST_INDEX: u16 = 0;
 
-/// Size of the double-fault handler stack (20 KiB).
-const STACK_SIZE: usize = 4096 * 5;
+/// Size of the kernel stack (128 KiB).
+const STACK_SIZE: usize = 4096 * 32;
 /// Ring0 privilege stack used when entering kernel from Ring3.
 const PRIVILEGE_STACK_INDEX: usize = 0;
 

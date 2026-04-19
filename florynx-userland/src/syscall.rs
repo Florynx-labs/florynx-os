@@ -60,6 +60,7 @@ pub fn debug_telemetry() -> Result<florynx_shared::syscall_abi::KernelTelemetryV
             size: 0,
             version: 0,
         },
+        _pad: 0,
         page_fault_total: 0,
         page_fault_user: 0,
         page_fault_kernel: 0,

@@ -13,7 +13,7 @@ use x86_64::VirtAddr;
 
 const EFAULT: i64 = -14;
 const EINVAL: i64 = -22;
-const MAX_SYSCALL_COPY: u64 = 64 * 1024;
+const MAX_SYSCALL_COPY: u64 = 8 * 1024 * 1024; // 8 MB for 1080p framebuffers
 const USER_MAX_VADDR: u64 = 0x0000_7FFF_FFFF_FFFF;
 
 #[derive(Clone, Copy)]

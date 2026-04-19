@@ -7,6 +7,14 @@
 // =============================================================================
 
 pub use crate::drivers::display::framebuffer::{FRAMEBUFFER, FramebufferManager};
+use ab_glyph::{Font, FontRef, PxScale, ScaleFont, point};
+use lazy_static::lazy_static;
+
+static ROBOTO_BYTES: &[u8] = include_bytes!("assets/fonts/Roboto/static/Roboto-Regular.ttf");
+
+lazy_static! {
+    pub static ref ROBOTO_FONT: FontRef<'static> = FontRef::try_from_slice(ROBOTO_BYTES).expect("Failed to load Roboto font");
+}
 
 // ---------------------------------------------------------------------------
 // Color
@@ -473,24 +481,63 @@ pub enum FontSize {
     Title,
 }
 
-/// Draw anti-aliased proportional text. Dispatches to the appropriate font size.
+/// Draw anti-aliased proportional text using Roboto TTF.
 pub fn draw_text_aa(fb: &mut FramebufferManager, text: &str, px: usize, py: usize, color: Color, size: FontSize) {
-    match size {
-        FontSize::Normal => {
-            crate::gui::font_data::draw_aa_normal(fb, text, px, py, color);
+    let scale = match size {
+        FontSize::Normal => PxScale::from(14.0),
+        FontSize::Title => PxScale::from(18.0),
+    };
+
+    let scaled_font = ROBOTO_FONT.as_scaled(scale);
+    let mut cursor_x = px as f32;
+    let cursor_y = py as f32 + scaled_font.ascent();
+
+    for c in text.chars() {
+        if c == '\n' { break; }
+        let glyph = scaled_font.scaled_glyph(c);
+        let mut glyph = glyph;
+        glyph.position = point(cursor_x, cursor_y);
+
+        if let Some(outline) = scaled_font.outline_glyph(glyph) {
+            let bounds = outline.px_bounds();
+            outline.draw(|x, y, coverage| {
+                let sx = (x as f32 + bounds.min.x) as usize;
+                let sy = (y as f32 + bounds.min.y) as usize;
+                
+                if coverage > 0.0 {
+                    let alpha = (coverage * 255.0) as u8;
+                    let (bg_r, bg_g, bg_b) = fb.get_pixel(sx, sy);
+                    let (nr, ng, nb) = crate::gui::font::alpha_blend(color, bg_r, bg_g, bg_b, alpha);
+                    fb.set_pixel(sx, sy, nr, ng, nb);
+                }
+            });
         }
-        FontSize::Title => {
-            crate::gui::font_data::draw_aa_title(fb, text, px, py, color);
-        }
+        cursor_x += scaled_font.h_advance(scaled_font.glyph_id(c));
     }
 }
 
-/// Measure text width in pixels for the given font size.
+/// Measure text width in pixels for the given font size using Roboto TTF.
 pub fn measure_text_aa(text: &str, size: FontSize) -> usize {
-    match size {
-        FontSize::Normal => crate::gui::font_data::measure_normal(text),
-        FontSize::Title => crate::gui::font_data::measure_title(text),
+    let scale = match size {
+        FontSize::Normal => PxScale::from(14.0),
+        FontSize::Title => PxScale::from(18.0),
+    };
+    let scaled_font = ROBOTO_FONT.as_scaled(scale);
+    let mut width = 0.0f32;
+    for c in text.chars() {
+        width += scaled_font.h_advance(scaled_font.glyph_id(c));
     }
+    width as usize
+}
+
+/// Helper to get the horizontal advance of a single character.
+pub fn char_advance_aa(c: char, size: FontSize) -> usize {
+    let scale = match size {
+        FontSize::Normal => PxScale::from(14.0),
+        FontSize::Title => PxScale::from(18.0),
+    };
+    let scaled_font = ROBOTO_FONT.as_scaled(scale);
+    scaled_font.h_advance(scaled_font.glyph_id(c)) as usize
 }
 
 /// Draw a small filled circle (for titlebar buttons).

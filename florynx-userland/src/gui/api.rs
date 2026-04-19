@@ -20,6 +20,15 @@ pub fn create_window(x: u32, y: u32, w: u32, h: u32) -> i64 {
     )
 }
 
+#[repr(C)]
+pub struct GuiBlitArgs {
+    pub x: u32,
+    pub y: u32,
+    pub w: u32,
+    pub h: u32,
+    pub buffer_ptr: u64,
+}
+
 pub fn draw_rect(win_id: u32, x: u32, y: u32, w: u32, h: u32, color_rgb: u32) -> i64 {
     let packed_xy = pack_u32_pair(x, y);
     let packed_wh_color = (((w as u64) & 0xFFFF) << 48)
@@ -31,6 +40,22 @@ pub fn draw_rect(win_id: u32, x: u32, y: u32, w: u32, h: u32, color_rgb: u32) ->
         win_id as u64,
         packed_xy,
         packed_wh_color,
+    )
+}
+
+pub fn blit_buffer(win_id: u32, x: u32, y: u32, w: u32, h: u32, buffer: &[u8]) -> i64 {
+    let args = GuiBlitArgs {
+        x,
+        y,
+        w,
+        h,
+        buffer_ptr: buffer.as_ptr() as u64,
+    };
+    syscall3(
+        syscall_abi::SYS_GUI_BLIT_BUFFER,
+        win_id as u64,
+        &args as *const GuiBlitArgs as u64,
+        0,
     )
 }
 

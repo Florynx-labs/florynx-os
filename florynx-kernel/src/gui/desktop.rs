@@ -25,7 +25,7 @@ const WALLPAPER_RGB: &[u8] = include_bytes!("assets/wallpaper_1024x768.rgb");
 // ---------------------------------------------------------------------------
 
 pub struct WindowManager {
-    windows: [Option<Window>; MAX_WINDOWS],
+    windows: Vec<Option<Window>>,
     /// Z-order: indices into `windows`, front-most first.
     order: [usize; MAX_WINDOWS],
     count: usize,
@@ -34,10 +34,12 @@ pub struct WindowManager {
 }
 
 impl WindowManager {
-    const fn new() -> Self {
-        const NONE: Option<Window> = None;
+    fn new() -> Self {
+        let mut windows = Vec::with_capacity(MAX_WINDOWS);
+        for _ in 0..MAX_WINDOWS { windows.push(None); }
+        
         WindowManager {
-            windows: [NONE; MAX_WINDOWS],
+            windows,
             order: [0; MAX_WINDOWS],
             count: 0,
             active: None,
@@ -308,18 +310,22 @@ pub struct Desktop {
 impl Desktop {
     fn new(screen_w: usize, screen_h: usize) -> Self {
         let mut dock = Dock::new();
-        // Default dock items with embedded icons and tooltip labels
-        dock.add_named(&crate::gui::icons::ICON_FOLDER, Color::rgb(0, 122, 204), "Files");
-        dock.add_named(&crate::gui::icons::ICON_TERMINAL, Color::rgb(70, 70, 80), "Terminal");
-        dock.add_named(&crate::gui::icons::ICON_SETTINGS, Color::rgb(50, 140, 80), "Settings");
-        dock.add_named(&crate::gui::icons::ICON_MONITOR, Color::rgb(180, 60, 60), "Monitor");
-        dock.add_named(&crate::gui::icons::ICON_DOCUMENT, Color::rgb(60, 60, 150), "Notes");
+        // Default dock items with high-fidelity PNG icons
+        dock.add_named(include_bytes!("assets/folder.png"), "Files");
+        dock.add_named(include_bytes!("assets/terminal.png"), "Terminal");
+        dock.add_named(include_bytes!("assets/settings.png"), "Settings");
+        dock.add_named(include_bytes!("assets/folder.png"), "Monitor");
+        dock.add_named(include_bytes!("assets/folder.png"), "Notes");
 
         // Mark first item as "active"
         dock.set_active(0, true);
 
         let mut menubar = MenuBar::new(screen_w);
         menubar.set_title("FlorynxOS");
+
+        // Pre-allocate background cache to the exact size to avoid mid-render reallocs
+        let mut bg_cache = Vec::with_capacity(screen_w * screen_h * 3);
+        unsafe { bg_cache.set_len(screen_w * screen_h * 3); }
 
         Desktop {
             wm: WindowManager::new(),
@@ -331,7 +337,7 @@ impl Desktop {
             mouse_y: screen_h / 2,
             prev_buttons: 0,
             needs_full_redraw: true,
-            bg_cache: Vec::new(),
+            bg_cache,
             bg_cached: false,
             dirty: [Rect::new(0, 0, 0, 0); MAX_DIRTY],
             dirty_count: 0,
@@ -1157,6 +1163,28 @@ pub fn set_window_rect(win_id: usize, x: usize, y: usize, w: usize, h: usize, rg
         if let Some(bounds) = dirty_bounds {
             desktop.mark_dirty(bounds);
             return true;
+        }
+    }
+    false
+}
+
+/// Injects a high-performance raw application pixel buffer into the window context.
+pub fn set_window_buffer(win_id: usize, x: usize, y: usize, w: usize, h: usize, buf: alloc::vec::Vec<u8>) -> bool {
+    let mut guard = DESKTOP.lock();
+    let desktop = match guard.as_mut() {
+        Some(d) => d,
+        None => return false,
+    };
+
+    for i in 0..desktop.wm.count {
+        let slot = desktop.wm.order[i];
+        if let Some(ref mut win) = desktop.wm.windows[slot] {
+            if win.id == win_id {
+                win.set_user_buffer(x, y, w, h, buf); // Ownership transferred
+                let bounds = win.bounds_with_shadow();
+                desktop.mark_dirty(bounds);
+                return true;
+            }
         }
     }
     false

@@ -100,6 +100,8 @@ pub struct Window {
     pub user_rect: Option<(usize, usize, usize, usize, u32)>,
     /// True if this window is created from userland syscalls.
     pub user_owned: bool,
+    /// Fast memory-mapped userland backing buffer: (x, y, w, h, rgba data).
+    pub user_buffer: Option<(usize, usize, usize, usize, Vec<u8>)>,
 
     // terminal / shell state
     pub is_terminal: bool,
@@ -144,6 +146,7 @@ impl Window {
             dirty: true, // needs initial draw
             user_rect: None,
             user_owned: false,
+            user_buffer: None,
             is_terminal: false,
             command_buffer: [0u8; 128],
             command_len: 0,
@@ -479,6 +482,38 @@ impl Window {
             let draw_y = cy + ry;
             renderer::draw_rect(fb, draw_x, draw_y, rw, rh, Color::rgb(r, g, b));
         }
+
+        // Fast path for raw RGBA Userland pixel dropping
+        if let Some((rx, ry, rw, rh, ref buf)) = self.user_buffer {
+            let start_x = cx + rx;
+            let start_y = cy + ry;
+            let (sw, sh) = fb.dimensions();
+            
+            for py in 0..rh {
+                let sy = start_y + py;
+                if sy >= sh { continue; }
+                for px in 0..rw {
+                    let sx = start_x + px;
+                    if sx >= sw { continue; }
+                    
+                    let idx = (py * rw + px) * 4;
+                    if idx + 3 < buf.len() {
+                        let r = buf[idx];
+                        let g = buf[idx + 1];
+                        let b = buf[idx + 2];
+                        let a = buf[idx + 3];
+                        
+                        if a == 255 {
+                            fb.set_pixel(sx, sy, r, g, b);
+                        } else if a > 0 {
+                            let (bg_r, bg_g, bg_b) = fb.get_pixel(sx, sy);
+                            let (nr, ng, nb) = crate::gui::font::alpha_blend(Color::rgba(r, g, b, 255), bg_r, bg_g, bg_b, a);
+                            fb.set_pixel(sx, sy, nr, ng, nb);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -782,5 +817,10 @@ impl Window {
 
     pub fn set_user_owned(&mut self, user_owned: bool) {
         self.user_owned = user_owned;
+    }
+
+    pub fn set_user_buffer(&mut self, x: usize, y: usize, w: usize, h: usize, buf: Vec<u8>) {
+        self.user_buffer = Some((x, y, w, h, buf));
+        self.dirty = true;
     }
 }

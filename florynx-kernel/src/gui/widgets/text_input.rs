@@ -79,7 +79,7 @@ impl TextInput {
 
         let mut accumulated = 0usize;
         for i in 0..self.text_len {
-            let ch_adv = crate::gui::font_data::advance_normal(self.text[i]) as usize;
+            let ch_adv = renderer::char_advance_aa(self.text[i] as char, FontSize::Normal);
             if text_start + accumulated + ch_adv / 2 >= click_x {
                 return i;
             }

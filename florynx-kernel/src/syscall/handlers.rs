@@ -446,6 +446,54 @@ pub fn sys_gui_draw_rect(_win_id: u64, _packed_xy: u64, _packed_wh_color: u64) -
     }
 }
 
+#[repr(C)]
+pub struct GuiBlitArgs {
+    pub x: u32,
+    pub y: u32,
+    pub w: u32,
+    pub h: u32,
+    pub buffer_ptr: u64,
+}
+
+/// SYS_GUI_BLIT_BUFFER
+/// arg1=win_id, arg2=ptr_to_GuiBlitArgs, arg3=reserved
+pub fn sys_gui_blit_buffer(win_id: u64, args_ptr: u64, _arg3: u64) -> i64 {
+    // 1. Read the struct
+    let args_bytes = match usermem::copy_from_user(args_ptr, core::mem::size_of::<GuiBlitArgs>() as u64) {
+        Ok(b) => b,
+        Err(e) => return e,
+    };
+    
+    // Safety: bytes length is guaranteed to match size_of::<GuiBlitArgs>
+    let args = unsafe { core::ptr::read_unaligned(args_bytes.as_ptr() as *const GuiBlitArgs) };
+    
+    // Bounds check to avoid monstrous allocs
+    if args.w > 4096 || args.h > 4096 {
+        return EINVAL;
+    }
+    
+    // Size = width * height * 4 (RGBA)
+    let buffer_size = (args.w as u64) * (args.h as u64) * 4;
+    
+    if buffer_size == 0 {
+        return 0; // nothing to draw
+    }
+    
+    // 2. Read the pixel buffer from userland in one shot mapping
+    let pixels = match usermem::copy_from_user(args.buffer_ptr, buffer_size) {
+        Ok(b) => b,
+        Err(e) => return e,
+    };
+    
+    // 3. Inject it into the window buffer directly
+    if desktop::set_window_buffer(win_id as usize, args.x as usize, args.y as usize, args.w as usize, args.h as usize, pixels) {
+        desktop::request_redraw();
+        0
+    } else {
+        EINVAL
+    }
+}
+
 /// SYS_GUI_DRAW_TEXT
 /// arg1=win_id, arg2=text_ptr, arg3=text_len
 pub fn sys_gui_draw_text(win_id: u64, text_ptr: u64, text_len: u64) -> i64 {

@@ -30,6 +30,7 @@ pub const SYS_GUI_POLL_EVENT: u64 = 0x1004;
 pub const SYS_GUI_SET_WALLPAPER: u64 = 0x1005;
 pub const SYS_GUI_INVALIDATE: u64 = 0x1006;
 pub const SYS_GUI_FOCUS_WINDOW: u64 = 0x1007;
+pub const SYS_GUI_BLIT_BUFFER: u64 = 0x1008;
 
 // --- IPC syscalls (0x2000+) ---
 pub const SYS_IPC_SEND: u64 = 0x2000;

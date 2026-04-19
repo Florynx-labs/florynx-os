@@ -7,8 +7,9 @@
 use crate::gui::renderer::{self, Color, FramebufferManager};
 use crate::gui::theme;
 use crate::gui::event::{Event, MouseButton, Rect};
-use crate::gui::icons::{self, Icon};
+use crate::gui::dynamic_icon::DynamicIcon;
 use crate::gui::animation::AnimatedScale;
+use alloc::vec::Vec;
 
 const MAX_ITEMS: usize = 10;
 const ICON_SIZE: usize = 48;
@@ -19,49 +20,53 @@ const SCALE_SPEED: f32 = 0.18;
 
 const MAX_ITEM_NAME: usize = 16;
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct DockItem {
-    pub color: Color,
-    pub icon: &'static Icon,
+    pub icon: DynamicIcon,
     pub active: bool,
     name: [u8; MAX_ITEM_NAME],
     name_len: usize,
 }
 
 pub struct Dock {
-    items: [Option<DockItem>; MAX_ITEMS],
-    count: usize,
+    items: Vec<DockItem>,
     pub hovered: Option<usize>,
     scales: [AnimatedScale; MAX_ITEMS],
 }
 
 impl Dock {
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         Dock {
-            items: [None; MAX_ITEMS],
-            count: 0,
+            items: Vec::new(),
             hovered: None,
             scales: [AnimatedScale::new(NORMAL_SCALE, SCALE_SPEED); MAX_ITEMS],
         }
     }
 
-    pub fn add(&mut self, icon: &'static Icon, color: Color) {
-        self.add_named(icon, color, "");
+    pub fn count(&self) -> usize {
+        self.items.len()
     }
 
-    pub fn add_named(&mut self, icon: &'static Icon, color: Color, label: &str) {
-        if self.count < MAX_ITEMS {
+    pub fn add(&mut self, png_bytes: &[u8]) {
+        self.add_named(png_bytes, "");
+    }
+
+    pub fn add_named(&mut self, png_bytes: &[u8], label: &str) {
+        if self.items.len() < MAX_ITEMS {
+            let icon = DynamicIcon::from_png_bytes(png_bytes).unwrap_or_else(|_| {
+                DynamicIcon { width: 48, height: 48, rgba_data: alloc::vec![0; 48*48*4] }
+            });
             let mut name = [0u8; MAX_ITEM_NAME];
             let len = label.len().min(MAX_ITEM_NAME);
             name[..len].copy_from_slice(&label.as_bytes()[..len]);
-            self.items[self.count] = Some(DockItem { color, icon, active: false, name, name_len: len });
-            self.count += 1;
+            self.items.push(DockItem { icon, active: false, name, name_len: len });
         }
     }
 
     fn dock_rect(&self, screen_w: usize, screen_h: usize) -> Rect {
         let t = &theme::DARK;
-        let total_w = self.count * ICON_SIZE + (self.count.saturating_sub(1)) * ICON_GAP + t.padding * 2;
+        let count = self.items.len();
+        let total_w = count * ICON_SIZE + (count.saturating_sub(1)) * ICON_GAP + t.padding * 2;
         let dock_x = (screen_w.saturating_sub(total_w)) / 2;
         let dock_y = screen_h - t.dock_h - t.dock_margin;
         Rect::new(dock_x, dock_y, total_w, t.dock_h)
@@ -92,46 +97,36 @@ impl Dock {
             Color::rgba(255, 255, 255, 20));
 
         // Icons with scale animation
-        for i in 0..self.count {
-            if let Some(item) = &self.items[i] {
-                let ir = self.icon_rect(i, screen_w, screen_h);
-                let icon_r = 8;
+        for i in 0..self.items.len() {
+            let item = &self.items[i];
+            let ir = self.icon_rect(i, screen_w, screen_h);
 
-                // Apply animated scale
-                let scale = self.scales[i].scale.current;
-                let scaled_size = (ICON_SIZE as f32 * scale) as usize;
-                let offset = (scaled_size.saturating_sub(ICON_SIZE)) / 2;
-                let sx = ir.x.saturating_sub(offset);
-                let sy = ir.y.saturating_sub(offset);
+            // Apply animated scale
+            let scale = self.scales[i].scale.current;
+            let scaled_size = (ICON_SIZE as f32 * scale) as usize;
+            let offset = (scaled_size.saturating_sub(ICON_SIZE)) / 2;
+            let sx = ir.x.saturating_sub(offset);
+            let sy = ir.y.saturating_sub(offset);
 
-                let color = if Some(i) == self.hovered {
-                    Color::rgb(
-                        item.color.r.saturating_add(30),
-                        item.color.g.saturating_add(30),
-                        item.color.b.saturating_add(30),
-                    )
-                } else {
-                    item.color
-                };
-                renderer::draw_rounded_rect(fb, sx, sy, scaled_size, scaled_size, icon_r, color);
+            // Removed solid rounded rect, letting PNG handle its own visuals/shadows
+            // Draw icon centered in scaled rect
+            let icon_x = sx + (scaled_size.saturating_sub(item.icon.width)) / 2;
+            let icon_y = sy + (scaled_size.saturating_sub(item.icon.height)) / 2;
+            
+            item.icon.draw_scaled(fb, icon_x, icon_y, scale);
 
-                // Draw icon centered in scaled rect
-                let icon_x = sx + (scaled_size.saturating_sub(item.icon.width)) / 2;
-                let icon_y = sy + (scaled_size.saturating_sub(item.icon.height)) / 2;
-                icons::draw_icon(fb, item.icon, icon_x, icon_y, Color::WHITE);
-
-                // Active indicator dot below icon
-                if item.active {
-                    let dot_x = sx + scaled_size / 2;
-                    let dot_y = sy + scaled_size + 4;
-                    renderer::draw_circle(fb, dot_x, dot_y, 2, t.accent);
-                }
+            // Active indicator dot below icon
+            if item.active {
+                let dot_x = sx + scaled_size / 2;
+                let dot_y = sy + scaled_size + 4;
+                renderer::draw_circle(fb, dot_x, dot_y, 2, t.accent);
             }
         }
 
         // Draw tooltip above hovered icon (with AA text)
         if let Some(hi) = self.hovered {
-            if let Some(item) = &self.items[hi] {
+            if hi < self.items.len() {
+                let item = &self.items[hi];
                 if item.name_len > 0 {
                     let ir = self.icon_rect(hi, screen_w, screen_h);
                     let label = core::str::from_utf8(&item.name[..item.name_len]).unwrap_or("");
@@ -154,7 +149,7 @@ impl Dock {
         match *event {
             Event::MouseMove { x, y } => {
                 self.hovered = None;
-                for i in 0..self.count {
+                for i in 0..self.items.len() {
                     if self.icon_rect(i, screen_w, screen_h).contains(x, y) {
                         self.hovered = Some(i);
                         break;
@@ -164,7 +159,7 @@ impl Dock {
             }
             Event::MouseDown { x, y, button: MouseButton::Left } => {
                 // Check which icon was clicked
-                for i in 0..self.count {
+                for i in 0..self.items.len() {
                     if self.icon_rect(i, screen_w, screen_h).contains(x, y) {
                         return Some(i); // Return clicked icon index
                     }
@@ -176,24 +171,23 @@ impl Dock {
     }
 
     pub fn set_active(&mut self, idx: usize, active: bool) {
-        if idx < self.count {
-            if let Some(ref mut item) = self.items[idx] {
-                item.active = active;
-            }
+        if idx < self.items.len() {
+            self.items[idx].active = active;
         }
     }
 
     /// Tick dock scale animations. Returns true if any scale changed (needs redraw).
     pub fn tick_animations(&mut self) -> bool {
         // Set targets based on current hover state
-        for i in 0..self.count {
+        let count = self.items.len();
+        for i in 0..count {
             let target = if Some(i) == self.hovered { HOVER_SCALE } else { NORMAL_SCALE };
             self.scales[i].set_target(target);
         }
 
         // Tick all
         let mut changed = false;
-        for i in 0..self.count {
+        for i in 0..count {
             if self.scales[i].tick() {
                 changed = true;
             }
